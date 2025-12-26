@@ -295,8 +295,19 @@ struct AutoCutScreen: View {
             
             // Progress indicator
             if viewModel.isProcessing {
-                ProgressView(viewModel.progressMessage)
-                    .padding()
+                VStack(spacing: 12) {
+                    // Custom animated progress bar
+                    AnimatedProgressBar(progress: viewModel.progress)
+                        .frame(height: 8)
+                        .padding(.horizontal, 40)
+                    
+                    // Progress message
+                    Text(viewModel.progressMessage)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 40)
+                }
+                .padding(.vertical, 16)
             }
             
             // Status message
@@ -310,6 +321,78 @@ struct AutoCutScreen: View {
             Spacer()
         }
         .padding()
+    }
+}
+
+// MARK: - Animated Progress Bar
+
+struct AnimatedProgressBar: View {
+    let progress: Double // 0.0 to 1.0
+    @State private var animatedProgress: Double = 0.0
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                // Background track
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.gray.opacity(0.2))
+                
+                // Progress bar
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: progressColors),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: geometry.size.width * min(max(animatedProgress, 0), 1))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: animatedProgress)
+                
+                // Shimmer effect overlay
+                if animatedProgress > 0 && animatedProgress < 1 {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [
+                                    Color.white.opacity(0),
+                                    Color.white.opacity(0.3),
+                                    Color.white.opacity(0)
+                                ]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: geometry.size.width * min(max(animatedProgress, 0), 1))
+                        .blur(radius: 2)
+                }
+            }
+        }
+        .onChange(of: progress) { newValue in
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                animatedProgress = newValue
+            }
+        }
+        .onAppear {
+            animatedProgress = progress
+        }
+    }
+    
+    // Color changes from blue -> cyan -> green as progress increases
+    private var progressColors: [Color] {
+        if progress < 0.33 {
+            // Blue phase (0-33%)
+            return [Color.blue.opacity(0.8), Color.blue.opacity(0.9)]
+        } else if progress < 0.66 {
+            // Cyan phase (33-66%)
+            return [Color.cyan.opacity(0.8), Color.blue.opacity(0.8)]
+        } else if progress < 0.9 {
+            // Green-cyan phase (66-90%)
+            return [Color.cyan.opacity(0.8), Color.green.opacity(0.7)]
+        } else {
+            // Green phase (90-100%)
+            return [Color.green.opacity(0.8), Color.green.opacity(0.9)]
+        }
     }
 }
 
@@ -359,6 +442,7 @@ class AutoPodCutViewModel: ObservableObject {
     
     @Published var isProcessing = false
     @Published var progressMessage = ""
+    @Published var progress: Double = 0.0 // 0.0 to 1.0
     @Published var statusMessage = ""
     @Published var isError = false
     
@@ -423,6 +507,7 @@ class AutoPodCutViewModel: ObservableObject {
             
             await MainActor.run {
                 self.isProcessing = true
+                self.progress = 0.0
                 self.statusMessage = ""
                 self.isError = false
             }
@@ -449,7 +534,7 @@ class AutoPodCutViewModel: ObservableObject {
         let processor = VideoCutProcessor()
         
         // Step 1: Load all assets
-        await updateProgress("Loading assets...")
+        await updateProgress("Loading assets...", progress: 0.1)
         let videoOneAsset = AVURLAsset(url: videoOneURL)
         let videoTwoAsset = AVURLAsset(url: videoTwoURL)
         let soundAudioAsset = AVURLAsset(url: soundAudioURL)
@@ -460,7 +545,7 @@ class AutoPodCutViewModel: ObservableObject {
         _ = try await soundAudioAsset.load(.tracks, .duration)
         
         // Step 2: Extract audio for synchronization
-        await updateProgress("Extracting audio channels...")
+        await updateProgress("Extracting audio channels...", progress: 0.2)
         let (leftChannel, rightChannel, sampleRate) = try await processor.extractStereoChannels(from: soundAudioAsset)
         
         // Create mono mix of Sound Audio for synchronization
@@ -468,12 +553,12 @@ class AutoPodCutViewModel: ObservableObject {
         print("Sound Audio: \(monoMix.count) samples (\(String(format: "%.1f", Double(monoMix.count) / Double(sampleRate)))s)")
         
         // Step 3: Extract audio from videos
-        await updateProgress("Extracting video audio tracks...")
+        await updateProgress("Extracting video audio tracks...", progress: 0.3)
         let videoOneAudio = try await processor.extractMonoAudio(from: videoOneAsset)
         let videoTwoAudio = try await processor.extractMonoAudio(from: videoTwoAsset)
         
         // Step 4: Synchronize BOTH videos INDEPENDENTLY
-        await updateProgress("Synchronizing Video One...")
+        await updateProgress("Synchronizing Video One...", progress: 0.4)
         let videoOneOffset = processor.findSyncOffset(
             videoAudio: videoOneAudio,
             referenceAudio: monoMix,
@@ -481,7 +566,7 @@ class AutoPodCutViewModel: ObservableObject {
             videoName: "Video One"
         )
         
-        await updateProgress("Synchronizing Video Two...")
+        await updateProgress("Synchronizing Video Two...", progress: 0.5)
         let videoTwoOffset = processor.findSyncOffset(
             videoAudio: videoTwoAudio,
             referenceAudio: monoMix,
@@ -495,7 +580,7 @@ class AutoPodCutViewModel: ObservableObject {
         print("==========================")
         
         // Step 5: Analyze loudness to determine speaker dominance over time
-        await updateProgress("Analyzing speaker loudness...")
+        await updateProgress("Analyzing speaker loudness...", progress: 0.6)
         let soundAudioDuration = try await soundAudioAsset.load(.duration)
         let speakerSegments = processor.analyzeSpeakerDominance(
             leftChannel: leftChannel,
@@ -511,7 +596,7 @@ class AutoPodCutViewModel: ObservableObject {
         }
         
         // Step 6: Get video properties from Video One for output
-        await updateProgress("Reading video properties...")
+        await updateProgress("Reading video properties...", progress: 0.7)
         guard let videoOneTrack = try await videoOneAsset.loadTracks(withMediaType: .video).first else {
             throw ProcessingError.noVideoTrack
         }
@@ -519,7 +604,7 @@ class AutoPodCutViewModel: ObservableObject {
         _ = try await videoOneTrack.load(.nominalFrameRate) // Load frame rate for potential future use
         
         // Step 7: Compose the final video
-        await updateProgress("Composing final video...")
+        await updateProgress("Composing final video...", progress: 0.8)
         let composition = try await processor.composeVideo(
             videoOneAsset: videoOneAsset,
             videoTwoAsset: videoTwoAsset,
@@ -532,7 +617,7 @@ class AutoPodCutViewModel: ObservableObject {
         )
         
         // Step 8: Export the final video
-        await updateProgress("Exporting video (this may take a while)...")
+        await updateProgress("Exporting video (this may take a while)...", progress: 0.9)
         try await processor.exportVideo(
             composition: composition.composition,
             videoComposition: composition.videoComposition,
@@ -540,6 +625,7 @@ class AutoPodCutViewModel: ObservableObject {
         )
         
         await MainActor.run {
+            self.progress = 1.0
             self.statusMessage = "Export completed successfully!"
             self.isError = false
             self.isProcessing = false
@@ -548,9 +634,10 @@ class AutoPodCutViewModel: ObservableObject {
         print("Export completed to: \(outputURL.path)")
     }
     
-    private func updateProgress(_ message: String) async {
+    private func updateProgress(_ message: String, progress: Double = 0.0) async {
         await MainActor.run {
             self.progressMessage = message
+            self.progress = progress
         }
     }
     
