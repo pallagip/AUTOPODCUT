@@ -9,12 +9,14 @@ import SwiftUI
 import AVFoundation
 import Accelerate
 import UniformTypeIdentifiers
+import StoreKit
 
 // MARK: - Navigation State
 
 enum AutoCutNavigationState {
     case audioQuestion
     case videoQuestion
+    case purchaseScreen
     case autoCut
 }
 
@@ -22,9 +24,11 @@ enum AutoCutNavigationState {
 
 struct ContentView: View {
     @StateObject private var viewModel = AutoPodCutViewModel()
+    @EnvironmentObject var storeManager: StoreManager
     @State private var navigationState: AutoCutNavigationState = .audioQuestion
     @State private var audioIsStereoSplit: Bool?
     @State private var videoFilesReady: Bool?
+    @State private var showPaywall: Bool = false
     
     var body: some View {
         Group {
@@ -40,14 +44,35 @@ struct ContentView: View {
                 VideoFileReadinessView(
                     videoFilesReady: $videoFilesReady,
                     onContinue: {
-                        navigationState = .autoCut
+                        // Check if user has purchased - if yes, skip purchase screen
+                        if storeManager.isPremiumUnlocked {
+                            navigationState = .autoCut
+                        } else {
+                            navigationState = .purchaseScreen
+                        }
                     }
                 )
+            case .purchaseScreen:
+                LifetimePurchaseView(storeManager: storeManager) {
+                    // Purchase successful, go to auto cut screen
+                    navigationState = .autoCut
+                } onSkip: {
+                    // User skipped, still allow access (optional - you can remove this)
+                    navigationState = .autoCut
+                }
             case .autoCut:
-                AutoCutScreen(viewModel: viewModel)
+                AutoCutScreen(viewModel: viewModel, showPaywall: $showPaywall)
             }
         }
         .frame(minWidth: 500, minHeight: 400)
+        .sheet(isPresented: $showPaywall) {
+            PurchaseView()
+                .environmentObject(storeManager)
+        }
+        .task {
+            // Load products and check purchase status on view appear
+            await storeManager.loadProducts()
+        }
     }
 }
 
@@ -245,6 +270,7 @@ struct VideoFileReadinessView: View {
 
 struct AutoCutScreen: View {
     @ObservedObject var viewModel: AutoPodCutViewModel
+    @Binding var showPaywall: Bool
     
     var body: some View {
         VStack(spacing: 16) {
@@ -261,14 +287,14 @@ struct AutoCutScreen: View {
             
             // Video One Selection Button
             FileSelectionButton(
-                title: "Select Video One",
+                title: "Select Video One (Left Audio)",
                 selectedFileName: viewModel.videoOneFileName,
                 action: { viewModel.selectVideoOne() }
             )
             
             // Video Two Selection Button
             FileSelectionButton(
-                title: "Select Video Two",
+                title: "Select Video Two (Right Audio)",
                 selectedFileName: viewModel.videoTwoFileName,
                 action: { viewModel.selectVideoTwo() }
             )
@@ -281,6 +307,17 @@ struct AutoCutScreen: View {
             )
             
             Spacer()
+            
+            // Buy/Premium Button
+            FuturisticButton(
+                title: "Unlock Premium",
+                isSelected: false,
+                isEnabled: true,
+                action: {
+                    showPaywall = true
+                }
+            )
+            .padding(.horizontal, 40)
             
             // AUTO CUT Button - disabled until all files are selected
             FuturisticButton(
