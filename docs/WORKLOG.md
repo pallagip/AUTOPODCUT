@@ -34,6 +34,9 @@ This document tracks completed tasks and milestones according to the `PLAN.md`.
 - **Action:** Created `VolumeAnalysisEngine` performing speedy `vDSP_rmsqv` calculations over an extracted audio buffer yielding true active energy interval blocks.
 - **Action:** Created `VolumeAnalysisEngineTests` checking empty buffers, flat constants, and handling bad dimensional layouts without crashing.
 - **Action:** Achieved passing status in CI logic tests natively.
+- **Action:** Implemented `ActiveSpeakerStateMachine` incorporating hysteresis to establish "hang time" and avoid erratic camera switches on micro-interruptions.
+- **Action:** Implemented `ActiveSpeakerStateMachineTests` that feed threshold arrays verifying dynamic state evaluation and adherence to bounds.
+- **Action:** Effectively verified integration logic with Apple's `xcodebuild -test`.
 
 ## Next Up
-- Epic 4: Synchronization & Speaker Detection -> Task 4.2: Active Speaker State Machine & Smoothing
+- Epic 4: Synchronization & Speaker Detection -> Task 4.3: EDL Generator

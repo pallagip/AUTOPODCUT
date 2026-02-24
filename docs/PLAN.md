@@ -47,7 +47,7 @@ Each task represents a small, mergeable, and testable unit of work.
 - [x] **Task 4.1: Volume Analysis Engine**
   - **Action:** Analyze the PCM buffer of each channel using `vDSP` to calculate average RMS/Power levels over fixed window sizes (e.g., 0.1s intervals).
   - **Tests:** Unit test with a synthetic audio buffer of known silence/noise to assert output power values.
-- [ ] **Task 4.2: Active Speaker State Machine & Smoothing**
+- [x] **Task 4.2: Active Speaker State Machine & Smoothing**
   - **Action:** Determine the "loudest" active channel per interval. Implement "hang time" (hysteresis) logic so it doesn't switch speakers rapidly if someone interrupts for <1 second.
   - **Tests:** Feed a mocked timeline of volume levels; assert the output decision states map correctly with hysteresis rules applied.
 - [ ] **Task 4.3: EDL Generator**
