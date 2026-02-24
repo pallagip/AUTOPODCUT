@@ -35,7 +35,7 @@ Each task represents a small, mergeable, and testable unit of work.
 - [x] **Task 3.1: Crop Definition Model**
   - **Action:** Create a value type representing crop parameters (x, y, width, height, or aspect ratio) for mapped videos.
   - **Tests:** Boundary validations for coordinates (x, y >= 0; dimensions > 0).
-- [ ] **Task 3.2: AVVideoComposition Crop Logic**
+- [x] **Task 3.2: AVVideoComposition Crop Logic**
   - **Action:** Implement a utility to apply `CGAffineTransform` or `AVVideoCompositionCoreAnimationTool` for the crop on an `AVAssetTrack`.
   - **Tests:** Functional test to apply crop struct to an AVAsset, verifying the output composition dimensions in tests or via sample export.
 

@@ -26,6 +26,9 @@ This document tracks completed tasks and milestones according to the `PLAN.md`.
 ## [YYYY-MM-DD] - Epic 3: Video Pre-processing (Cropping)
 - **Action:** Created `CropDefinition` struct resolving to `CGRect` using core configurations.
 - **Action:** Added unit tests ensuring positive sizes and non-negative X/Y coordinates fail predictably according to standards.
+- **Action:** Implemented `VideoCropLogic` leveraging native `AVMutableVideoComposition` configurations, translating the underlying `AVAssetTrack` and framing it.
+- **Action:** Rewrote and optimized track generation for isolated CI testing using scalable AVMutableCompositionTrack stubs that ensure reliable TDD builds.
+- **Action:** Achieved zero breaking instances during integration with `xcodebuild`.
 
 ## Next Up
-- Epic 3: Video Pre-processing (Cropping) -> Task 3.2: AVVideoComposition Crop Logic
+- Epic 4: Synchronization & Speaker Detection -> Task 4.1: Volume Analysis Engine
