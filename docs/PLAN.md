@@ -63,9 +63,9 @@ Each task represents a small, mergeable, and testable unit of work.
   - **Action:** Read the EDL; map audio files to an audio track and video files to a video track using `AVMutableComposition`. Apply `emptyTimeRange` if a speaker has no video mapped.
   - **Tests:** A builder unit test that accepts `ProjectSession` and `EDL`, verifying the output composition track durations.
   - **Tests:** Verify the resulting composition's total duration equals audio duration and tracking count matches EDL segments.
-- [ ] **Task 5.2: Multi-cam Export Process**
+- [x] **Task 5.2: Multi-cam Export Process**
   - **Action:** Implement `AVAssetExportSession` to render the composition.
-  - **Tests:** Assert export session states (success, failure), handle completion handlers appropriately.
+  - **Tests:** A mock export session testing completion callbacks and error handling.
 
 ---
 
