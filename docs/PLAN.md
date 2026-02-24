@@ -57,10 +57,11 @@ Each task represents a small, mergeable, and testable unit of work.
 ---
 
 ## Epic 5: Final Assembly & Export
-**Goal:** Build the final timeline combining continuous audio, mapped cropped videos, and black fallback frames according to the EDL.
+**Goal:** Generate the compiled `AVMutableComposition` and set up the export session into a new physical file.
 
-- [ ] **Task 5.1: AVMutableComposition Builder**
-  - **Action:** Build a composer that creates an `AVMutableComposition`. It adds the master audio as a single track, then sequentially places video segments according to the EDL. Wait, maybe inject black frames (`AVVideoComposition`) where appropriate.
+- [x] **Task 5.1: AVMutableComposition Builder**
+  - **Action:** Read the EDL; map audio files to an audio track and video files to a video track using `AVMutableComposition`. Apply `emptyTimeRange` if a speaker has no video mapped.
+  - **Tests:** A builder unit test that accepts `ProjectSession` and `EDL`, verifying the output composition track durations.
   - **Tests:** Verify the resulting composition's total duration equals audio duration and tracking count matches EDL segments.
 - [ ] **Task 5.2: Multi-cam Export Process**
   - **Action:** Implement `AVAssetExportSession` to render the composition.
