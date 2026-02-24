@@ -30,5 +30,10 @@ This document tracks completed tasks and milestones according to the `PLAN.md`.
 - **Action:** Rewrote and optimized track generation for isolated CI testing using scalable AVMutableCompositionTrack stubs that ensure reliable TDD builds.
 - **Action:** Achieved zero breaking instances during integration with `xcodebuild`.
 
+## [YYYY-MM-DD] - Epic 4: Synchronization & Speaker Detection
+- **Action:** Created `VolumeAnalysisEngine` performing speedy `vDSP_rmsqv` calculations over an extracted audio buffer yielding true active energy interval blocks.
+- **Action:** Created `VolumeAnalysisEngineTests` checking empty buffers, flat constants, and handling bad dimensional layouts without crashing.
+- **Action:** Achieved passing status in CI logic tests natively.
+
 ## Next Up
-- Epic 4: Synchronization & Speaker Detection -> Task 4.1: Volume Analysis Engine
+- Epic 4: Synchronization & Speaker Detection -> Task 4.2: Active Speaker State Machine & Smoothing
