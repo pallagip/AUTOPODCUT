@@ -11,6 +11,9 @@ This document tracks completed tasks and milestones according to the `PLAN.md`.
 - **Action:** Implemented `AudioFileLoader` model to safely ingest audio assets via AVAsset/AVAudioFile.
 - **Action:** Added `AudioFileLoaderTests` to verify handling of missing files, valid multichannel structures, and invalid formats.
 - **Action:** Executed tests successfully through Xcodebuild using Trunk-Based Development approach.
+- **Action:** Implemented `ChannelBufferExtractor` to extract individual channel float data into a single-channel `AVAudioPCMBuffer`.
+- **Action:** Implemented `ChannelBufferExtractorTests` to verify accurate channel index extraction and error states.
+- **Action:** Executed all tests locally with `xcodebuild test` to full completion.
 
 ## Next Up
-- Epic 1: Audio Ingestion & Multi-Channel Parsing -> Task 1.2: Channel Buffer Extractor
+- Epic 2: Media Mapping (State Management) -> Task 2.1: Project Mapping Models

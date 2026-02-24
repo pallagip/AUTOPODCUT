@@ -14,7 +14,7 @@ Each task represents a small, mergeable, and testable unit of work.
 - [x] **Task 1.1: Audio File Loader Model**
   - **Action:** Create a service or model to load an audio asset path using `AVAudioFile` or `AVAsset`.
   - **Tests:** Feed a mock multi-channel wav file; assert the channel count and duration match expectations.
-- [ ] **Task 1.2: Channel Buffer Extractor**
+- [x] **Task 1.2: Channel Buffer Extractor**
   - **Action:** Implement AVFoundation logic to extract single-channel buffers (`AVAudioPCMBuffer`) for isolated analysis.
   - **Tests:** Verify extracted buffer's format is single-channel and length matches the source.
 
