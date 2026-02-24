@@ -17,3 +17,11 @@ This document tracks completed tasks and milestones according to the `PLAN.md`.
 
 ## Next Up
 - Epic 2: Media Mapping (State Management) -> Task 2.1: Project Mapping Models
+
+## [YYYY-MM-DD] - Epic 2: Media Mapping (State Management)
+- **Action:** Created `ProjectSession` and `ChannelMapping` structs representing logic between index mapped and unmapped video URLs.
+- **Action:** Created `ProjectSessionTests` asserting boundaries against non-configured sessions and correctly evaluating state mappings and default `nil` black screen evaluations.
+- **Action:** Successfully tested and verified through Xcode builds.
+
+## Next Up
+- Epic 3: Video Pre-processing (Cropping) -> Task 3.1: Crop Definition Model

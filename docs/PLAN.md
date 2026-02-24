@@ -23,7 +23,7 @@ Each task represents a small, mergeable, and testable unit of work.
 ## Epic 2: Media Mapping (State Management)
 **Goal:** Map specific video files to specific audio channels. If a channel is speaking and has no mapped video, we default to black.
 
-- [ ] **Task 2.1: Project Mapping Models**
+- [x] **Task 2.1: Project Mapping Models**
   - **Action:** Create state structs (e.g., `ProjectSession`, `ChannelMapping`) representing: Audio Channel Index -> Expected Video URL.
   - **Tests:** Unit test addition, removal, and validation of mappings, including handling missing videos (which should trigger a "black frame" fallback state).
 
