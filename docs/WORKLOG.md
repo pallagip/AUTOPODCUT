@@ -37,6 +37,8 @@ This document tracks completed tasks and milestones according to the `PLAN.md`.
 - **Action:** Implemented `ActiveSpeakerStateMachine` incorporating hysteresis to establish "hang time" and avoid erratic camera switches on micro-interruptions.
 - **Action:** Implemented `ActiveSpeakerStateMachineTests` that feed threshold arrays verifying dynamic state evaluation and adherence to bounds.
 - **Action:** Effectively verified integration logic with Apple's `xcodebuild -test`.
+- **Action:** Implemented `EDLGenerator` alongside an `EditDecision` model mapping contiguous channel-state indices into chronological sequences based heavily on continuous array boundary markers.
+- **Action:** Implemented `EDLGeneratorTests` structurally validating output interval math translating exactly into accurately represented `CMTimeRange` values.
 
 ## Next Up
-- Epic 4: Synchronization & Speaker Detection -> Task 4.3: EDL Generator
+- Epic 5: Final Assembly & Export -> Task 5.1: AVMutableComposition Builder

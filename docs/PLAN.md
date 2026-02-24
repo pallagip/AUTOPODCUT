@@ -50,7 +50,7 @@ Each task represents a small, mergeable, and testable unit of work.
 - [x] **Task 4.2: Active Speaker State Machine & Smoothing**
   - **Action:** Determine the "loudest" active channel per interval. Implement "hang time" (hysteresis) logic so it doesn't switch speakers rapidly if someone interrupts for <1 second.
   - **Tests:** Feed a mocked timeline of volume levels; assert the output decision states map correctly with hysteresis rules applied.
-- [ ] **Task 4.3: EDL Generator**
+- [x] **Task 4.3: EDL Generator**
   - **Action:** Convert the Active Speaker states into an Edit Decision List (EDL) array of `[startTime, endTime, targetChannel]`.
   - **Tests:** Convert known continuous speaker states into accurate contiguous time ranges.
 
