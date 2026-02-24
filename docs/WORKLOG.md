@@ -23,5 +23,9 @@ This document tracks completed tasks and milestones according to the `PLAN.md`.
 - **Action:** Created `ProjectSessionTests` asserting boundaries against non-configured sessions and correctly evaluating state mappings and default `nil` black screen evaluations.
 - **Action:** Successfully tested and verified through Xcode builds.
 
+## [YYYY-MM-DD] - Epic 3: Video Pre-processing (Cropping)
+- **Action:** Created `CropDefinition` struct resolving to `CGRect` using core configurations.
+- **Action:** Added unit tests ensuring positive sizes and non-negative X/Y coordinates fail predictably according to standards.
+
 ## Next Up
-- Epic 3: Video Pre-processing (Cropping) -> Task 3.1: Crop Definition Model
+- Epic 3: Video Pre-processing (Cropping) -> Task 3.2: AVVideoComposition Crop Logic

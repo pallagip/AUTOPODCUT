@@ -32,7 +32,7 @@ Each task represents a small, mergeable, and testable unit of work.
 ## Epic 3: Video Pre-processing (Cropping)
 **Goal:** Define and apply visual cropping to video sources before compiling the final timeline.
 
-- [ ] **Task 3.1: Crop Definition Model**
+- [x] **Task 3.1: Crop Definition Model**
   - **Action:** Create a value type representing crop parameters (x, y, width, height, or aspect ratio) for mapped videos.
   - **Tests:** Boundary validations for coordinates (x, y >= 0; dimensions > 0).
 - [ ] **Task 3.2: AVVideoComposition Crop Logic**
