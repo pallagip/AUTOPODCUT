@@ -11,7 +11,7 @@ Each task represents a small, mergeable, and testable unit of work.
 ## Epic 1: Audio Ingestion & Multi-Channel Parsing
 **Goal:** Read the master multi-channel `.wav` file and expose individual track boundaries and buffers.
 
-- [ ] **Task 1.1: Audio File Loader Model**
+- [x] **Task 1.1: Audio File Loader Model**
   - **Action:** Create a service or model to load an audio asset path using `AVAudioFile` or `AVAsset`.
   - **Tests:** Feed a mock multi-channel wav file; assert the channel count and duration match expectations.
 - [ ] **Task 1.2: Channel Buffer Extractor**
