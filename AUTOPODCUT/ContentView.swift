@@ -261,14 +261,14 @@ struct AutoCutScreen: View {
             
             // Video One Selection Button
             FileSelectionButton(
-                title: "Select Video One",
+                title: "Select Video One (Left)",
                 selectedFileName: viewModel.videoOneFileName,
                 action: { viewModel.selectVideoOne() }
             )
             
             // Video Two Selection Button
             FileSelectionButton(
-                title: "Select Video Two",
+                title: "Select Video Two (Right)",
                 selectedFileName: viewModel.videoTwoFileName,
                 action: { viewModel.selectVideoTwo() }
             )
@@ -368,7 +368,7 @@ struct AnimatedProgressBar: View {
                 }
             }
         }
-        .onChange(of: progress) { newValue in
+        .onChange(of: progress) { oldValue, newValue in
             withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
                 animatedProgress = newValue
             }
@@ -587,7 +587,7 @@ class AutoPodCutViewModel: ObservableObject {
             rightChannel: rightChannel,
             sampleRate: sampleRate,
             duration: soundAudioDuration.seconds,
-            minimumShotLength: 4.0
+            minimumShotLength: 3.0
         )
         
         print("Generated \(speakerSegments.count) video segments")
@@ -977,23 +977,39 @@ class VideoCutProcessor {
         
         // Convert to split complex format
         signalPadded.withUnsafeBufferPointer { signalPtr in
-            var splitSignal = DSPSplitComplex(realp: &signalReal, imagp: &signalImag)
-            vDSP_ctoz(UnsafePointer<DSPComplex>(OpaquePointer(signalPtr.baseAddress!)),
-                      2, &splitSignal, 1, vDSP_Length(fftLength / 2))
+            signalReal.withUnsafeMutableBufferPointer { realPtr in
+                signalImag.withUnsafeMutableBufferPointer { imagPtr in
+                    var splitSignal = DSPSplitComplex(realp: realPtr.baseAddress!, imagp: imagPtr.baseAddress!)
+                    vDSP_ctoz(UnsafePointer<DSPComplex>(OpaquePointer(signalPtr.baseAddress!)),
+                              2, &splitSignal, 1, vDSP_Length(fftLength / 2))
+                }
+            }
         }
         
         refPadded.withUnsafeBufferPointer { refPtr in
-            var splitRef = DSPSplitComplex(realp: &refReal, imagp: &refImag)
-            vDSP_ctoz(UnsafePointer<DSPComplex>(OpaquePointer(refPtr.baseAddress!)),
-                      2, &splitRef, 1, vDSP_Length(fftLength / 2))
+            refReal.withUnsafeMutableBufferPointer { realPtr in
+                refImag.withUnsafeMutableBufferPointer { imagPtr in
+                    var splitRef = DSPSplitComplex(realp: realPtr.baseAddress!, imagp: imagPtr.baseAddress!)
+                    vDSP_ctoz(UnsafePointer<DSPComplex>(OpaquePointer(refPtr.baseAddress!)),
+                              2, &splitRef, 1, vDSP_Length(fftLength / 2))
+                }
+            }
         }
         
         // Forward FFT
-        var splitSignal = DSPSplitComplex(realp: &signalReal, imagp: &signalImag)
-        var splitRef = DSPSplitComplex(realp: &refReal, imagp: &refImag)
-        
-        vDSP_fft_zrip(fftSetup, &splitSignal, 1, log2n, FFTDirection(FFT_FORWARD))
-        vDSP_fft_zrip(fftSetup, &splitRef, 1, log2n, FFTDirection(FFT_FORWARD))
+        signalReal.withUnsafeMutableBufferPointer { signalRealPtr in
+            signalImag.withUnsafeMutableBufferPointer { signalImagPtr in
+                refReal.withUnsafeMutableBufferPointer { refRealPtr in
+                    refImag.withUnsafeMutableBufferPointer { refImagPtr in
+                        var splitSignal = DSPSplitComplex(realp: signalRealPtr.baseAddress!, imagp: signalImagPtr.baseAddress!)
+                        var splitRef = DSPSplitComplex(realp: refRealPtr.baseAddress!, imagp: refImagPtr.baseAddress!)
+                        
+                        vDSP_fft_zrip(fftSetup, &splitSignal, 1, log2n, FFTDirection(FFT_FORWARD))
+                        vDSP_fft_zrip(fftSetup, &splitRef, 1, log2n, FFTDirection(FFT_FORWARD))
+                    }
+                }
+            }
+        }
         
         // Multiply signal FFT by complex conjugate of reference FFT
         // This gives cross-correlation in frequency domain
@@ -1011,14 +1027,20 @@ class VideoCutProcessor {
         }
         
         // Inverse FFT
-        var splitResult = DSPSplitComplex(realp: &resultReal, imagp: &resultImag)
-        vDSP_fft_zrip(fftSetup, &splitResult, 1, log2n, FFTDirection(FFT_INVERSE))
-        
-        // Convert back to real array
         var correlation = [Float](repeating: 0, count: fftLength)
-        vDSP_ztoc(&splitResult, 1,
-                  UnsafeMutablePointer<DSPComplex>(OpaquePointer(UnsafeMutablePointer(&correlation))),
-                  2, vDSP_Length(fftLength / 2))
+        resultReal.withUnsafeMutableBufferPointer { resultRealPtr in
+            resultImag.withUnsafeMutableBufferPointer { resultImagPtr in
+                var splitResult = DSPSplitComplex(realp: resultRealPtr.baseAddress!, imagp: resultImagPtr.baseAddress!)
+                vDSP_fft_zrip(fftSetup, &splitResult, 1, log2n, FFTDirection(FFT_INVERSE))
+                
+                // Convert back to real array
+                correlation.withUnsafeMutableBufferPointer { corrPtr in
+                    vDSP_ztoc(&splitResult, 1,
+                              UnsafeMutablePointer<DSPComplex>(OpaquePointer(corrPtr.baseAddress!)),
+                              2, vDSP_Length(fftLength / 2))
+                }
+            }
+        }
         
         // Scale by fftLength (vDSP convention)
         var scale = 1.0 / Float(fftLength)
