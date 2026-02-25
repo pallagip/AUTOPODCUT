@@ -88,14 +88,20 @@ struct ContentView: View {
                         SectionView(title: viewModel.cutMode == .mainSpeakerSwitch ? "Step 4 & 5: Configure Other Speaker" : "Step 4 & 5: Configure Speaker 2") {
                             HStack(spacing: 20) {
                                 VStack(alignment: .leading, spacing: 12) {
-                                    Text("Select Audio Track").font(.subheadline).foregroundColor(.secondary)
-                                    Picker("", selection: $viewModel.soundTrackTwo) {
-                                        ForEach(1...viewModel.soundAudioNumChannels, id: \.self) { track in
-                                            Text("Track \(track)").tag(track)
+                                    Text(viewModel.cutMode == .mainSpeakerSwitch ? "Group Tracks" : "Select Audio Track").font(.subheadline).foregroundColor(.secondary)
+                                    if viewModel.cutMode == .mainSpeakerSwitch {
+                                        Text("Auto-Group (Tracks 3, 4, 5)")
+                                            .foregroundColor(.secondary)
+                                            .padding(.vertical, 8)
+                                    } else {
+                                        Picker("", selection: $viewModel.soundTrackTwo) {
+                                            ForEach(1...viewModel.soundAudioNumChannels, id: \.self) { track in
+                                                Text("Track \(track)").tag(track)
+                                            }
                                         }
+                                        .pickerStyle(MenuPickerStyle())
+                                        .frame(maxWidth: 150)
                                     }
-                                    .pickerStyle(MenuPickerStyle())
-                                    .frame(maxWidth: 150)
                                 }
                                 
                                 VStack(alignment: .leading, spacing: 12) {
@@ -515,14 +521,39 @@ class AutoPodCutViewModel: ObservableObject {
         
         // Step 2: Extract audio for synchronization
         await updateProgress("Extracting audio channels...", progress: 0.2)
-        let (leftChannel, rightChannel, sampleRate) = try await processor.extractSelectedChannels(
-            from: soundAudioAsset,
-            leftIndex: soundTrackOne,
-            rightIndex: soundTrackTwo
-        )
+        
+        var leftChannel: [Float] = []
+        var rightChannel: [Float] = [] // Will represent right channel in classic mode, NOT used in mainSpeakerSwitch
+        var groupChannels: [[Float]] = [] // Used only in mainSpeakerSwitch
+        let sampleRate: Float
+        
+        if cutMode == .mainSpeakerSwitch {
+            let extracted = try await processor.extractMainAndGroupChannels(
+                from: soundAudioAsset,
+                mainIndex: soundTrackOne
+            )
+            leftChannel = extracted.main
+            groupChannels = extracted.group
+            sampleRate = extracted.sampleRate
+        } else {
+            let extracted = try await processor.extractSelectedChannels(
+                from: soundAudioAsset,
+                leftIndex: soundTrackOne,
+                rightIndex: soundTrackTwo
+            )
+            leftChannel = extracted.left
+            rightChannel = extracted.right
+            sampleRate = extracted.sampleRate
+        }
         
         // Create mono mix of Sound Audio for synchronization
-        let monoMix = processor.createMonoMix(left: leftChannel, right: rightChannel)
+        let monoMix: [Float]
+        if cutMode == .mainSpeakerSwitch {
+            monoMix = processor.createMonoMixGroup(main: leftChannel, group: groupChannels)
+        } else {
+            monoMix = processor.createMonoMix(left: leftChannel, right: rightChannel)
+        }
+        
         print("Sound Audio: \(monoMix.count) samples (\(String(format: "%.1f", Double(monoMix.count) / Double(sampleRate)))s)")
         
         // Step 3: Extract audio from videos
@@ -562,9 +593,9 @@ class AutoPodCutViewModel: ObservableObject {
         let speakerSegments: [SpeakerSegment]
         
         if cutMode == .mainSpeakerSwitch {
-            speakerSegments = processor.analyzeMainSpeakerSwitch(
+            speakerSegments = processor.analyzeMainSpeakerSwitchGroup(
                 mainChannel: leftChannel, // Video One is Main Speaker
-                otherChannel: rightChannel,
+                groupChannels: groupChannels,
                 sampleRate: sampleRate,
                 duration: exactDurationSeconds,
                 silenceDuration: 0.8
@@ -772,6 +803,86 @@ class VideoCutProcessor {
         return (leftSamples, rightSamples, sampleRate)
     }
     
+    /// Extracts the Main channel and a group of all other available channels
+    func extractMainAndGroupChannels(from asset: AVAsset, mainIndex: Int) async throws -> (main: [Float], group: [[Float]], sampleRate: Float) {
+        guard let audioTrack = try await asset.loadTracks(withMediaType: .audio).first else {
+            throw ProcessingError.noAudioTrack
+        }
+        
+        let reader = try AVAssetReader(asset: asset)
+        
+        let outputSettings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false
+        ]
+        
+        let output = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: outputSettings)
+        reader.add(output)
+        reader.startReading()
+        
+        var mainSamples: [Float] = []
+        var groupSamples: [[Float]] = []
+        var sampleRate: Float = 44100
+        var channelCount: Int = 2
+        var isFormatRead = false
+        
+        while let sampleBuffer = output.copyNextSampleBuffer() {
+            if !isFormatRead, let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
+                let audioStreamBasicDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+                if let asbd = audioStreamBasicDescription?.pointee {
+                    sampleRate = Float(asbd.mSampleRate)
+                    channelCount = Int(asbd.mChannelsPerFrame)
+                    
+                    // Initialize group arrays
+                    let numGroupChannels = max(1, channelCount - 1)
+                    groupSamples = Array(repeating: [], count: numGroupChannels)
+                    
+                    isFormatRead = true
+                }
+            }
+            
+            guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
+            
+            var length = 0
+            var dataPointer: UnsafeMutablePointer<Int8>?
+            CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &dataPointer)
+            
+            guard let data = dataPointer else { continue }
+            
+            let floatCount = length / MemoryLayout<Float>.size
+            let floatPointer = data.withMemoryRebound(to: Float.self, capacity: floatCount) { $0 }
+            
+            let numFrames = floatCount / channelCount
+            let mIdx = max(0, min(mainIndex - 1, channelCount - 1))
+            
+            for frame in 0..<numFrames {
+                let baseIndex = frame * channelCount
+                mainSamples.append(floatPointer[baseIndex + mIdx])
+                
+                var groupIdx = 0
+                for c in 0..<channelCount {
+                    // Skip tracks 1 and 2 (indices 0 and 1) for the group mix, as well as the main track
+                    if c != mIdx && c > 1 {
+                        groupSamples[groupIdx].append(floatPointer[baseIndex + c])
+                        groupIdx += 1
+                    }
+                }
+            }
+        }
+        
+        // Trim the groupSamples array to only hold the channels we actually extracted
+        // This is necessary because we pre-allocated `channelCount - 1` earlier,
+        // but now we are skipping indices 0 and 1.
+        let actualGroupCount = groupSamples.filter { !$0.isEmpty }.count
+        let finalGroupSamples = Array(groupSamples.prefix(actualGroupCount))
+        
+        print("Extracted Main channel and \(finalGroupSamples.count) Group channels with \(mainSamples.count) samples each at \(sampleRate) Hz")
+        return (mainSamples, finalGroupSamples, sampleRate)
+    }
+    
     /// Extracts mono audio from a video asset for synchronization purposes
     func extractMonoAudio(from asset: AVAsset) async throws -> [Float] {
         guard let audioTrack = try await asset.loadTracks(withMediaType: .audio).first else {
@@ -826,6 +937,25 @@ class VideoCutProcessor {
         
         for i in 0..<count {
             mono[i] = (left[i] + right[i]) * 0.5
+        }
+        
+        return mono
+    }
+    
+    /// Creates a mono mix from main and group channels
+    func createMonoMixGroup(main: [Float], group: [[Float]]) -> [Float] {
+        let count = main.count
+        var mono = [Float](repeating: 0, count: count)
+        let totalChannels = Float(1 + group.count)
+        
+        for i in 0..<count {
+            var sum = main[i]
+            for g in group {
+                if i < g.count {
+                    sum += g[i]
+                }
+            }
+            mono[i] = sum / totalChannels
         }
         
         return mono
@@ -1670,6 +1800,97 @@ class VideoCutProcessor {
             
             // Main speaker is "silent" if its volume is below the dynamic threshold 
             // OR if the other channel is 1.5x louder (identifying microphone bleed)
+            let isSilent = (mRMS < silenceThreshold) || (oRMS > mRMS * 1.5)
+            
+            if isSilent {
+                silentWindowsCount += 1
+            } else {
+                silentWindowsCount = 0
+            }
+            
+            let shouldBeMain = silentWindowsCount < requiredSilentWindows
+            let targetSpeaker: Speaker = shouldBeMain ? .videoOne : .videoTwo
+            
+            if targetSpeaker != currentSpeaker {
+                if i > 0 { // Avoid zero-length first segment
+                    segments.append(SpeakerSegment(
+                        speaker: currentSpeaker,
+                        startTime: segmentStartTime,
+                        endTime: currentTime
+                    ))
+                }
+                currentSpeaker = targetSpeaker
+                segmentStartTime = currentTime
+            }
+        }
+        
+        // Final segment
+        segments.append(SpeakerSegment(
+            speaker: currentSpeaker,
+            startTime: segmentStartTime,
+            endTime: duration
+        ))
+        
+        return segments
+    }
+    
+    /// Analyzes speaker segments matching 1 Main Speaker against an Auto-Group of other speakers
+    func analyzeMainSpeakerSwitchGroup(
+        mainChannel: [Float],
+        groupChannels: [[Float]],
+        sampleRate: Float,
+        duration: Double,
+        silenceDuration: Double
+    ) -> [SpeakerSegment] {
+        
+        // 100ms analysis windows
+        let windowSize = Int(sampleRate * 0.1)
+        let windowCount = mainChannel.count / windowSize
+        
+        var mainRMS: [Float] = []
+        var maxGroupRMS: [Float] = [] // We care about the maximum volume among the group
+        
+        for i in 0..<windowCount {
+            let startIndex = i * windowSize
+            let endIndex = min(startIndex + windowSize, mainChannel.count)
+            mainRMS.append(calculateRMS(Array(mainChannel[startIndex..<endIndex])))
+            
+            var maxG: Float = 0
+            for groupChannel in groupChannels {
+                let endG = min(startIndex + windowSize, groupChannel.count)
+                if startIndex < endG {
+                    let gRms = calculateRMS(Array(groupChannel[startIndex..<endG]))
+                    maxG = max(maxG, gRms)
+                }
+            }
+            maxGroupRMS.append(maxG)
+        }
+        
+        // Dynamically calculate noise floor and peak
+        let sortedMain = mainRMS.sorted()
+        let noiseFloor = sortedMain[max(0, sortedMain.count / 20)] // 5th percentile
+        let peakRMS = sortedMain[min(sortedMain.count - 1, Int(Double(sortedMain.count) * 0.95))] // 95th percentile
+        
+        // The silence threshold is dynamically set at 15% of the dynamic range above noise floor
+        let silenceThreshold = noiseFloor + (peakRMS - noiseFloor) * 0.15
+        
+        print("Main Group Config - Noise Floor: \(noiseFloor), Peak: \(peakRMS), Silence Threshold: \(silenceThreshold)")
+        
+        let windowDuration = Double(windowSize) / Double(sampleRate)
+        let requiredSilentWindows = Int(silenceDuration / windowDuration)
+        
+        var segments: [SpeakerSegment] = []
+        var currentSpeaker: Speaker = .videoOne // Default to Main Speaker
+        var segmentStartTime = 0.0
+        var silentWindowsCount = 0
+        
+        for i in 0..<windowCount {
+            let mRMS = mainRMS[i]
+            let oRMS = maxGroupRMS[i] // Use max group volume instead of single "other" track
+            let currentTime = Double(i) * windowDuration
+            
+            // Main speaker is "silent" if its volume is below the dynamic threshold 
+            // OR if any other channel is 1.5x louder (identifying microphone bleed)
             let isSilent = (mRMS < silenceThreshold) || (oRMS > mRMS * 1.5)
             
             if isSilent {
