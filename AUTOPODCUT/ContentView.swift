@@ -1786,41 +1786,48 @@ class VideoCutProcessor {
         print("Main Speaker Config - Noise Floor: \(noiseFloor), Peak: \(peakRMS), Silence Threshold: \(silenceThreshold)")
         
         let windowDuration = Double(windowSize) / Double(sampleRate)
-        let requiredSilentWindows = Int(silenceDuration / windowDuration)
         
         var segments: [SpeakerSegment] = []
         var currentSpeaker: Speaker = .videoOne // Default to Main Speaker
         var segmentStartTime = 0.0
-        var silentWindowsCount = 0
+        var lastSwitchTime = 0.0
+        let minimumShotLength = 1.0 // 1 second minimum shot length
         
         for i in 0..<windowCount {
             let mRMS = mainRMS[i]
             let oRMS = otherRMS[i]
             let currentTime = Double(i) * windowDuration
             
-            // Main speaker is "silent" if its volume is below the dynamic threshold 
-            // OR if the other channel is 1.5x louder (identifying microphone bleed)
-            let isSilent = (mRMS < silenceThreshold) || (oRMS > mRMS * 1.5)
+            let mainIsLoud = mRMS > silenceThreshold
+            let otherIsLoud = oRMS > silenceThreshold
             
-            if isSilent {
-                silentWindowsCount += 1
+            var targetSpeaker = currentSpeaker
+            
+            if otherIsLoud && oRMS > (mRMS * 1.5) {
+                targetSpeaker = .videoTwo
+            } else if mainIsLoud && mRMS > (oRMS * 1.5) {
+                targetSpeaker = .videoOne
+            } else if mainIsLoud && otherIsLoud {
+                targetSpeaker = (mRMS >= oRMS) ? .videoOne : .videoTwo
             } else {
-                silentWindowsCount = 0
+                // If neither is clearly loud, keep the current speaker's camera
+                targetSpeaker = currentSpeaker
             }
             
-            let shouldBeMain = silentWindowsCount < requiredSilentWindows
-            let targetSpeaker: Speaker = shouldBeMain ? .videoOne : .videoTwo
-            
             if targetSpeaker != currentSpeaker {
-                if i > 0 { // Avoid zero-length first segment
-                    segments.append(SpeakerSegment(
-                        speaker: currentSpeaker,
-                        startTime: segmentStartTime,
-                        endTime: currentTime
-                    ))
+                let timeSinceLastSwitch = currentTime - lastSwitchTime
+                if timeSinceLastSwitch >= minimumShotLength {
+                    if i > 0 { // Avoid zero-length first segment
+                        segments.append(SpeakerSegment(
+                            speaker: currentSpeaker,
+                            startTime: segmentStartTime,
+                            endTime: currentTime
+                        ))
+                    }
+                    currentSpeaker = targetSpeaker
+                    segmentStartTime = currentTime
+                    lastSwitchTime = currentTime
                 }
-                currentSpeaker = targetSpeaker
-                segmentStartTime = currentTime
             }
         }
         
@@ -1877,41 +1884,48 @@ class VideoCutProcessor {
         print("Main Group Config - Noise Floor: \(noiseFloor), Peak: \(peakRMS), Silence Threshold: \(silenceThreshold)")
         
         let windowDuration = Double(windowSize) / Double(sampleRate)
-        let requiredSilentWindows = Int(silenceDuration / windowDuration)
         
         var segments: [SpeakerSegment] = []
         var currentSpeaker: Speaker = .videoOne // Default to Main Speaker
         var segmentStartTime = 0.0
-        var silentWindowsCount = 0
+        var lastSwitchTime = 0.0
+        let minimumShotLength = 1.0 // 1 second minimum shot length
         
         for i in 0..<windowCount {
             let mRMS = mainRMS[i]
             let oRMS = maxGroupRMS[i] // Use max group volume instead of single "other" track
             let currentTime = Double(i) * windowDuration
             
-            // Main speaker is "silent" if its volume is below the dynamic threshold 
-            // OR if any other channel is 1.5x louder (identifying microphone bleed)
-            let isSilent = (mRMS < silenceThreshold) || (oRMS > mRMS * 1.5)
+            let mainIsLoud = mRMS > silenceThreshold
+            let groupIsLoud = oRMS > silenceThreshold
             
-            if isSilent {
-                silentWindowsCount += 1
+            var targetSpeaker = currentSpeaker
+            
+            if groupIsLoud && oRMS > (mRMS * 1.5) {
+                targetSpeaker = .videoTwo
+            } else if mainIsLoud && mRMS > (oRMS * 1.5) {
+                targetSpeaker = .videoOne
+            } else if mainIsLoud && groupIsLoud {
+                targetSpeaker = (mRMS >= oRMS) ? .videoOne : .videoTwo
             } else {
-                silentWindowsCount = 0
+                // If neither is clearly loud, keep the current speaker's camera
+                targetSpeaker = currentSpeaker
             }
             
-            let shouldBeMain = silentWindowsCount < requiredSilentWindows
-            let targetSpeaker: Speaker = shouldBeMain ? .videoOne : .videoTwo
-            
             if targetSpeaker != currentSpeaker {
-                if i > 0 { // Avoid zero-length first segment
-                    segments.append(SpeakerSegment(
-                        speaker: currentSpeaker,
-                        startTime: segmentStartTime,
-                        endTime: currentTime
-                    ))
+                let timeSinceLastSwitch = currentTime - lastSwitchTime
+                if timeSinceLastSwitch >= minimumShotLength {
+                    if i > 0 { // Avoid zero-length first segment
+                        segments.append(SpeakerSegment(
+                            speaker: currentSpeaker,
+                            startTime: segmentStartTime,
+                            endTime: currentTime
+                        ))
+                    }
+                    currentSpeaker = targetSpeaker
+                    segmentStartTime = currentTime
+                    lastSwitchTime = currentTime
                 }
-                currentSpeaker = targetSpeaker
-                segmentStartTime = currentTime
             }
         }
         
@@ -1993,62 +2007,104 @@ class VideoCutProcessor {
             at: .zero
         )
         
-        // Insert video segments based on speaker analysis
-        for segment in speakerSegments {
-            let segmentStart = CMTime(seconds: segment.startTime, preferredTimescale: 600)
-            let segmentEnd = CMTime(seconds: segment.endTime, preferredTimescale: 600)
-            let segmentDuration = CMTimeSubtract(segmentEnd, segmentStart)
+        let videoOneAssetDuration = try await videoOneAsset.load(.duration)
+        let videoTwoAssetDuration = try await videoTwoAsset.load(.duration)
+        let v1DurSecs = CMTimeGetSeconds(videoOneAssetDuration)
+        let v2DurSecs = CMTimeGetSeconds(videoTwoAssetDuration)
+        
+        // --- NEW CONTINUOUS TRACK INJECTION LOGIC ---
+        // Instead of injecting piecemeal segments (which causes black frames if gaps exist),
+        // we inject the entirety of Video 1 and Video 2 into their respective tracks as base layers.
+        // We will then use VideoCompositionInstructions to toggle opacity.
+        
+        if let track = videoOneTrack {
+            var v1StartOffset = CMTime(seconds: videoOneOffset, preferredTimescale: 600)
+            var v1CompStart = CMTime.zero
             
-            switch segment.speaker {
-            case .videoOne:
-                if let track = videoOneTrack {
-                    // Calculate source time accounting for sync offset
-                    let sourceTime = CMTime(seconds: segment.startTime + videoOneOffset, preferredTimescale: 600)
-                    let videoAssetDuration = try await videoOneAsset.load(.duration)
-                    
-                    // Check if source time is within video bounds
-                    if sourceTime >= .zero && sourceTime < videoAssetDuration {
-                        let availableDuration = CMTimeSubtract(videoAssetDuration, sourceTime)
-                        let actualDuration = CMTimeMinimum(segmentDuration, availableDuration)
-                        
-                        if actualDuration > .zero {
-                            try compVideoOneTrack.insertTimeRange(
-                                CMTimeRange(start: sourceTime, duration: actualDuration),
-                                of: track,
-                                at: segmentStart
-                            )
-                        }
-                    }
-                }
-                
-            case .videoTwo:
-                if let track = videoTwoTrack {
-                    let sourceTime = CMTime(seconds: segment.startTime + videoTwoOffset, preferredTimescale: 600)
-                    let videoAssetDuration = try await videoTwoAsset.load(.duration)
-                    
-                    if sourceTime >= .zero && sourceTime < videoAssetDuration {
-                        let availableDuration = CMTimeSubtract(videoAssetDuration, sourceTime)
-                        let actualDuration = CMTimeMinimum(segmentDuration, availableDuration)
-                        
-                        if actualDuration > .zero {
-                            try compVideoTwoTrack.insertTimeRange(
-                                CMTimeRange(start: sourceTime, duration: actualDuration),
-                                of: track,
-                                at: segmentStart
-                            )
-                        }
-                    }
-                }
-                
-            case .none:
-                // For missing video segments, we'll need to insert empty space
-                // AVMutableComposition will show black/transparent by default
-                // A proper white background would require AVVideoCompositionCoreAnimationTool
-                print("No video available for segment \(segment.startTime) - \(segment.endTime)")
+            if videoOneOffset < 0 {
+                // Video starts AFTER audio. So it starts at composition time abs(offset).
+                v1CompStart = CMTime(seconds: -videoOneOffset, preferredTimescale: 600)
+                v1StartOffset = .zero
+            }
+            
+            let sourceDuration = CMTimeSubtract(videoOneAssetDuration, v1StartOffset)
+            if sourceDuration > .zero {
+                try compVideoOneTrack.insertTimeRange(
+                    CMTimeRange(start: v1StartOffset, duration: sourceDuration),
+                    of: track,
+                    at: v1CompStart
+                )
             }
         }
         
-        // Determine if we should render a half-width video (e.g., vertical/TikTok style)
+        if let track = videoTwoTrack {
+            var v2StartOffset = CMTime(seconds: videoTwoOffset, preferredTimescale: 600)
+            var v2CompStart = CMTime.zero
+            
+            if videoTwoOffset < 0 {
+                v2CompStart = CMTime(seconds: -videoTwoOffset, preferredTimescale: 600)
+                v2StartOffset = .zero
+            }
+            
+            let sourceDuration = CMTimeSubtract(videoTwoAssetDuration, v2StartOffset)
+            if sourceDuration > .zero {
+                try compVideoTwoTrack.insertTimeRange(
+                    CMTimeRange(start: v2StartOffset, duration: sourceDuration),
+                    of: track,
+                    at: v2CompStart
+                )
+            }
+        }
+        
+        // Resolve segments to prevent black frames when a video runs out of duration
+        var resolvedSegments: [SpeakerSegment] = []
+        for segment in speakerSegments {
+            var currentTime = segment.startTime
+            let endTime = segment.endTime
+            
+            while currentTime < endTime {
+                if (endTime - currentTime) < 0.001 { break } // Avoid micro-segments
+                
+                let remainingDuration = endTime - currentTime
+                let primarySpeaker = segment.speaker
+                let secondarySpeaker: Speaker = (primarySpeaker == .videoOne) ? .videoTwo : .videoOne
+                
+                func availableDuration(for speaker: Speaker, at time: Double) -> Double {
+                    guard speaker != .none else { return 0 }
+                    let offset = (speaker == .videoOne) ? videoOneOffset : videoTwoOffset
+                    let srcTime = time + offset
+                    let maxDur = (speaker == .videoOne) ? v1DurSecs : v2DurSecs
+                    if srcTime >= 0 && srcTime < maxDur {
+                        return maxDur - srcTime
+                    }
+                    return 0
+                }
+                
+                let primaryAvailable = availableDuration(for: primarySpeaker, at: currentTime)
+                
+                if primaryAvailable >= remainingDuration - 0.001 {
+                    resolvedSegments.append(SpeakerSegment(speaker: primarySpeaker, startTime: currentTime, endTime: endTime))
+                    currentTime = endTime
+                } else if primaryAvailable > 0.01 {
+                    let partialEndTime = currentTime + primaryAvailable
+                    resolvedSegments.append(SpeakerSegment(speaker: primarySpeaker, startTime: currentTime, endTime: partialEndTime))
+                    currentTime = partialEndTime
+                } else {
+                    let secondaryAvailable = availableDuration(for: secondarySpeaker, at: currentTime)
+                    if secondaryAvailable >= remainingDuration - 0.001 {
+                        resolvedSegments.append(SpeakerSegment(speaker: secondarySpeaker, startTime: currentTime, endTime: endTime))
+                        currentTime = endTime
+                    } else if secondaryAvailable > 0.01 {
+                        let partialEndTime = currentTime + secondaryAvailable
+                        resolvedSegments.append(SpeakerSegment(speaker: secondarySpeaker, startTime: currentTime, endTime: partialEndTime))
+                        currentTime = partialEndTime
+                    } else {
+                        resolvedSegments.append(SpeakerSegment(speaker: .none, startTime: currentTime, endTime: endTime))
+                        currentTime = endTime
+                    }
+                }
+            }
+        }
         // This makes sense if both videos are requested to be cropped.
         let isHalfWidthOutput = (videoOneCrop != .full && videoTwoCrop != .full)
         let renderSize = isHalfWidthOutput ? CGSize(width: outputSize.width / 2, height: outputSize.height) : outputSize
@@ -2061,7 +2117,7 @@ class VideoCutProcessor {
         // Build individual instructions per segment to avoid empty track crashes
         var instructions: [AVMutableVideoCompositionInstruction] = []
         
-        for segment in speakerSegments {
+        for segment in resolvedSegments {
             let segmentStart = CMTime(seconds: segment.startTime, preferredTimescale: 600)
             let segmentEnd = CMTime(seconds: segment.endTime, preferredTimescale: 600)
             let rawSegmentDuration = CMTimeSubtract(segmentEnd, segmentStart)
@@ -2072,59 +2128,51 @@ class VideoCutProcessor {
             let instruction = AVMutableVideoCompositionInstruction()
             instruction.timeRange = CMTimeRange(start: segmentStart, duration: rawSegmentDuration)
             
-            var layers: [AVMutableVideoCompositionLayerInstruction] = []
+            // Construct persistent Layer Instructions
+            let layer1 = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoOneTrack)
+            let transform1 = (try? await videoOneTrack?.load(.preferredTransform)) ?? .identity
+            if isHalfWidthOutput {
+                let offsetTransform = videoOneCrop == .rightHalf ? CGAffineTransform(translationX: -outputSize.width / 2, y: 0) : .identity
+                layer1.setTransform(transform1.concatenating(offsetTransform), at: segmentStart)
+            } else {
+                if videoOneCrop == .leftHalf {
+                    layer1.setCropRectangle(CGRect(x: 0, y: 0, width: outputSize.width / 2, height: outputSize.height), at: segmentStart)
+                } else if videoOneCrop == .rightHalf {
+                    layer1.setCropRectangle(CGRect(x: outputSize.width / 2, y: 0, width: outputSize.width / 2, height: outputSize.height), at: segmentStart)
+                }
+                layer1.setTransform(transform1, at: segmentStart)
+            }
             
-            // Check if Video One is active in this segment
+            let layer2 = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoTwoTrack)
+            let transform2 = (try? await videoTwoTrack?.load(.preferredTransform)) ?? .identity
+            if isHalfWidthOutput {
+                let offsetTransform = videoTwoCrop == .rightHalf ? CGAffineTransform(translationX: -outputSize.width / 2, y: 0) : .identity
+                layer2.setTransform(transform2.concatenating(offsetTransform), at: segmentStart)
+            } else {
+                if videoTwoCrop == .leftHalf {
+                    layer2.setCropRectangle(CGRect(x: 0, y: 0, width: outputSize.width / 2, height: outputSize.height), at: segmentStart)
+                } else if videoTwoCrop == .rightHalf {
+                    layer2.setCropRectangle(CGRect(x: outputSize.width / 2, y: 0, width: outputSize.width / 2, height: outputSize.height), at: segmentStart)
+                }
+                layer2.setTransform(transform2, at: segmentStart)
+            }
+            
+            // Set opacity based on active speaker
             if segment.speaker == .videoOne {
-                let sourceTime = CMTime(seconds: segment.startTime + videoOneOffset, preferredTimescale: 600)
-                if let track = videoOneTrack, sourceTime >= .zero, let assetDuration = try? await videoOneAsset.load(.duration), sourceTime < assetDuration {
-                    let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoOneTrack)
-                    let transform = try? await track.load(.preferredTransform)
-                    
-                    if isHalfWidthOutput {
-                        let offsetTransform = videoOneCrop == .rightHalf ? CGAffineTransform(translationX: -outputSize.width / 2, y: 0) : .identity
-                        layer.setTransform((transform ?? .identity).concatenating(offsetTransform), at: segmentStart)
-                    } else {
-                        if videoOneCrop == .leftHalf {
-                            layer.setCropRectangle(CGRect(x: 0, y: 0, width: outputSize.width / 2, height: outputSize.height), at: segmentStart)
-                        } else if videoOneCrop == .rightHalf {
-                            layer.setCropRectangle(CGRect(x: outputSize.width / 2, y: 0, width: outputSize.width / 2, height: outputSize.height), at: segmentStart)
-                        }
-                        layer.setTransform(transform ?? .identity, at: segmentStart)
-                    }
-                    layer.setOpacity(1.0, at: segmentStart)
-                    layers.append(layer)
-                }
+                layer1.setOpacity(1.0, at: segmentStart)
+                layer2.setOpacity(0.0, at: segmentStart)
+                instruction.layerInstructions = [layer1, layer2] // videoOne is on top
             } else if segment.speaker == .videoTwo {
-                let sourceTime = CMTime(seconds: segment.startTime + videoTwoOffset, preferredTimescale: 600)
-                if let track = videoTwoTrack, sourceTime >= .zero, let assetDuration = try? await videoTwoAsset.load(.duration), sourceTime < assetDuration {
-                    let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoTwoTrack)
-                    let transform = try? await track.load(.preferredTransform)
-                    
-                    if isHalfWidthOutput {
-                        let offsetTransform = videoTwoCrop == .rightHalf ? CGAffineTransform(translationX: -outputSize.width / 2, y: 0) : .identity
-                        layer.setTransform((transform ?? .identity).concatenating(offsetTransform), at: segmentStart)
-                    } else {
-                        if videoTwoCrop == .leftHalf {
-                            layer.setCropRectangle(CGRect(x: 0, y: 0, width: outputSize.width / 2, height: outputSize.height), at: segmentStart)
-                        } else if videoTwoCrop == .rightHalf {
-                            layer.setCropRectangle(CGRect(x: outputSize.width / 2, y: 0, width: outputSize.width / 2, height: outputSize.height), at: segmentStart)
-                        }
-                        layer.setTransform(transform ?? .identity, at: segmentStart)
-                    }
-                    layer.setOpacity(1.0, at: segmentStart)
-                    layers.append(layer)
-                }
+                layer1.setOpacity(0.0, at: segmentStart)
+                layer2.setOpacity(1.0, at: segmentStart)
+                instruction.layerInstructions = [layer2, layer1] // videoTwo is on top
+            } else {
+                // If neither, show videoOne but let it fall back 
+                layer1.setOpacity(1.0, at: segmentStart)
+                layer2.setOpacity(0.0, at: segmentStart)
+                instruction.layerInstructions = [layer1, layer2]
             }
             
-            // If layers is empty, add a dummy layer with 0 opacity to prevent empty array crashes
-            if layers.isEmpty {
-                let emptyLayer = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoOneTrack) // We can bind it safely to track 1
-                emptyLayer.setOpacity(0.0, at: segmentStart)
-                layers.append(emptyLayer)
-            }
-            
-            instruction.layerInstructions = layers
             instructions.append(instruction)
         }
         
