@@ -79,3 +79,17 @@ Each task represents a small, mergeable, and testable unit of work.
    - Commit directly to `main` for small tasks or use short-lived feature branches that merge daily.
    - Write tests first, then implementation.
    - Maintain track of finished work in `/docs/WORKLOG.md`.
+
+---
+
+## Epic 6: Advanced UI & Video Mapping Redesign
+**Goal:** Overhaul the user interface to adopt an advanced, asset-centric workflow. The UI will prompt the user for the master audio file first, followed by multiple video file uploads. Crucially, the app must support using a single video file multiple times (e.g., a wide shot), applying different crop settings for each instance to map to different audio channels.
+
+- [x] **Task 6.1: Multi-Use Asset Models & Independent Cropping**
+  - **Action:** Refactor `ProjectSession` (Media Pool) so a single video URL can be mapped to multiple audio channels with distinct `CropDefinition` parameters.
+- [x] **Task 6.2: Audio Input First Step**
+  - **Action:** Update UI to present `AudioSelectionView` as the first step, removing static questions like "Is audio split into left/right?".
+- [x] **Task 6.3: Media Pool & Video Uploads**
+  - **Action:** Create a `VideoUploadView` to ingest one or multiple video files into a staging area.
+- [x] **Task 6.4: Channel Mapping UI**
+  - **Action:** Create `MappingView` to let the user select a video from the Media Pool for each detected audio channel and define its specific crop setting.

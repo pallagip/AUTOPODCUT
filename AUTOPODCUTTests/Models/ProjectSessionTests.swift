@@ -32,10 +32,30 @@ final class ProjectSessionTests: XCTestCase {
         session.setMasterAudio(url: masterURL, channelCount: 2)
         
         let videoURL1 = URL(fileURLWithPath: "/dummy/video1.mp4")
+        let crop = try CropDefinition(x: 0, y: 0, width: 100, height: 100)
         
-        try session.mapVideo(url: videoURL1, toChannelIndex: 0)
+        session.addVideoToPool(url: videoURL1)
+        XCTAssertEqual(session.mediaPool.count, 1)
+        
+        try session.mapVideo(url: videoURL1, toChannelIndex: 0, crop: crop)
         XCTAssertEqual(session.videoURLForChannel(0), videoURL1)
+        XCTAssertEqual(session.mappings[0]?.cropDefinition, crop)
         XCTAssertNil(session.videoURLForChannel(1), "Channel 1 should remain nil (black frame)")
+    }
+    
+    func testRemoveVideoFromPoolUnmapsChannels() throws {
+        let masterURL = URL(fileURLWithPath: "/dummy/audio.wav")
+        session.setMasterAudio(url: masterURL, channelCount: 2)
+        
+        let videoURL1 = URL(fileURLWithPath: "/dummy/video1.mp4")
+        session.addVideoToPool(url: videoURL1)
+        try session.mapVideo(url: videoURL1, toChannelIndex: 0)
+        try session.mapVideo(url: videoURL1, toChannelIndex: 1)
+        
+        session.removeVideoFromPool(url: videoURL1)
+        XCTAssertEqual(session.mediaPool.count, 0)
+        XCTAssertNil(session.videoURLForChannel(0))
+        XCTAssertNil(session.videoURLForChannel(1))
     }
     
     func testUnmapVideoSuccessfully() throws {

@@ -12,42 +12,149 @@ import UniformTypeIdentifiers
 
 // MARK: - Navigation State
 
-enum AutoCutNavigationState {
-    case audioQuestion
-    case videoQuestion
-    case autoCut
+enum CutMode {
+    case classic
+    case mainSpeakerSwitch
 }
 
 // MARK: - Main Content View
 
 struct ContentView: View {
     @StateObject private var viewModel = AutoPodCutViewModel()
-    @State private var navigationState: AutoCutNavigationState = .audioQuestion
-    @State private var audioIsStereoSplit: Bool?
-    @State private var videoFilesReady: Bool?
     
     var body: some View {
-        Group {
-            switch navigationState {
-            case .audioQuestion:
-                AudioChannelQuestionView(
-                    audioIsStereoSplit: $audioIsStereoSplit,
-                    onContinue: {
-                        navigationState = .videoQuestion
+        VStack(spacing: 20) {
+            Text("AutoPodCut")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+                .padding(.top, 20)
+            
+            ScrollView {
+                VStack(spacing: 24) {
+                    
+                    Picker("Operation Mode", selection: $viewModel.cutMode) {
+                        Text("Classic AutoCut").tag(CutMode.classic)
+                        Text("MainSpeakerSwitch").tag(CutMode.mainSpeakerSwitch)
                     }
-                )
-            case .videoQuestion:
-                VideoFileReadinessView(
-                    videoFilesReady: $videoFilesReady,
-                    onContinue: {
-                        navigationState = .autoCut
+                    .pickerStyle(SegmentedPickerStyle())
+                    .padding(.bottom, 10)
+                    
+                    // Step 1
+                    SectionView(title: "Step 1: Select Master Audio (.wav)") {
+                        FileSelectionButton(
+                            title: "Select Master Audio",
+                            selectedFileName: viewModel.soundAudioFileName,
+                            action: { viewModel.selectSoundAudio() }
+                        )
                     }
-                )
-            case .autoCut:
-                AutoCutScreen(viewModel: viewModel)
+                    
+                    if viewModel.soundAudioURL != nil {
+                        
+                        // SPEAKER 1 (Main if applicable)
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text(viewModel.cutMode == .mainSpeakerSwitch ? "Step 2 & 3: Configure Main Speaker" : "Step 2 & 3: Configure Speaker 1").font(.headline)
+                            HStack(spacing: 20) {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Select Audio Track").font(.subheadline).foregroundColor(.secondary)
+                                    Picker("", selection: $viewModel.soundTrackOne) {
+                                        ForEach(1...viewModel.soundAudioNumChannels, id: \.self) { track in
+                                            Text("Track \(track)").tag(track)
+                                        }
+                                    }
+                                    .pickerStyle(MenuPickerStyle())
+                                    .frame(maxWidth: 150)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Select Video File").font(.subheadline).foregroundColor(.secondary)
+                                    FileSelectionButton(
+                                        title: viewModel.cutMode == .mainSpeakerSwitch ? "Select Main Video" : "Select Video 1",
+                                        selectedFileName: viewModel.videoOneFileName,
+                                        action: { viewModel.selectVideoOne() }
+                                    )
+                                }
+                            }
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(viewModel.cutMode == .mainSpeakerSwitch ? Color.yellow.opacity(0.15) : Color.gray.opacity(0.1))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(viewModel.cutMode == .mainSpeakerSwitch ? Color.yellow.opacity(0.8) : Color.clear, lineWidth: 2)
+                        )
+                        .cornerRadius(12)
+                        
+                        // SPEAKER 2
+                        SectionView(title: viewModel.cutMode == .mainSpeakerSwitch ? "Step 4 & 5: Configure Other Speaker" : "Step 4 & 5: Configure Speaker 2") {
+                            HStack(spacing: 20) {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Select Audio Track").font(.subheadline).foregroundColor(.secondary)
+                                    Picker("", selection: $viewModel.soundTrackTwo) {
+                                        ForEach(1...viewModel.soundAudioNumChannels, id: \.self) { track in
+                                            Text("Track \(track)").tag(track)
+                                        }
+                                    }
+                                    .pickerStyle(MenuPickerStyle())
+                                    .frame(maxWidth: 150)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Select Video File").font(.subheadline).foregroundColor(.secondary)
+                                    FileSelectionButton(
+                                        title: viewModel.cutMode == .mainSpeakerSwitch ? "Select Other Video" : "Select Video 2",
+                                        selectedFileName: viewModel.videoTwoFileName,
+                                        action: { viewModel.selectVideoTwo() }
+                                    )
+                                }
+                            }
+                        }
+                        
+                        // Step 6
+                        FuturisticButton(
+                            title: viewModel.isProcessing ? "PROCESSING..." : "EXPORT",
+                            isSelected: viewModel.canPerformAutoCut,
+                            isEnabled: viewModel.canPerformAutoCut && !viewModel.isProcessing,
+                            action: { viewModel.performAutoCut() }
+                        )
+                    }
+                    
+                    if viewModel.isProcessing {
+                        VStack(spacing: 12) {
+                            AnimatedProgressBar(progress: viewModel.progress)
+                                .frame(height: 8)
+                            Text(viewModel.progressMessage)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    if !viewModel.statusMessage.isEmpty {
+                        Text(viewModel.statusMessage)
+                            .font(.caption)
+                            .foregroundColor(viewModel.isError ? .red : .green)
+                    }
+                }
+                .padding()
+                .frame(maxWidth: 800)
             }
         }
-        .frame(minWidth: 500, minHeight: 400)
+        .frame(minWidth: 700, minHeight: 650)
+    }
+}
+
+struct SectionView<Content: View>: View {
+    let title: String
+    let content: () -> Content
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title).font(.headline)
+            content()
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(12)
     }
 }
 
@@ -139,190 +246,7 @@ struct FuturisticButton: View {
     }
 }
 
-// MARK: - Audio Channel Question View
 
-struct AudioChannelQuestionView: View {
-    @Binding var audioIsStereoSplit: Bool?
-    let onContinue: () -> Void
-    
-    var body: some View {
-        VStack(spacing: 32) {
-            Spacer()
-            
-            Text("Is the audio split into left and right channels for two speakers?")
-                .font(.title2)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-            
-            VStack(spacing: 20) {
-                FuturisticButton(
-                    title: "YES",
-                    isSelected: audioIsStereoSplit == true,
-                    isEnabled: true,
-                    action: {
-                        audioIsStereoSplit = true
-                        onContinue()
-                    }
-                )
-                
-                FuturisticButton(
-                    title: "NO",
-                    isSelected: audioIsStereoSplit == false,
-                    isEnabled: true,
-                    action: {
-                        audioIsStereoSplit = false
-                    }
-                )
-            }
-            .padding(.horizontal, 40)
-            
-            if audioIsStereoSplit == false {
-                Text("This will not work properly for this purpose.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 40)
-                    .padding(.top, 8)
-            }
-            
-            Spacer()
-        }
-        .padding()
-    }
-}
-
-// MARK: - Video File Readiness View
-
-struct VideoFileReadinessView: View {
-    @Binding var videoFilesReady: Bool?
-    let onContinue: () -> Void
-    
-    var body: some View {
-        VStack(spacing: 32) {
-            Spacer()
-            
-            Text("Do you have both video files ready?")
-                .font(.title2)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-            
-            VStack(spacing: 20) {
-                FuturisticButton(
-                    title: "YES",
-                    isSelected: videoFilesReady == true,
-                    isEnabled: true,
-                    action: {
-                        videoFilesReady = true
-                        onContinue()
-                    }
-                )
-                
-                FuturisticButton(
-                    title: "NO",
-                    isSelected: videoFilesReady == false,
-                    isEnabled: true,
-                    action: {
-                        videoFilesReady = false
-                    }
-                )
-            }
-            .padding(.horizontal, 40)
-            
-            if videoFilesReady == false {
-                Text("You will need two video files to use Auto Cut.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 40)
-                    .padding(.top, 8)
-            }
-            
-            Spacer()
-        }
-        .padding()
-    }
-}
-
-// MARK: - Auto Cut Screen
-
-struct AutoCutScreen: View {
-    @ObservedObject var viewModel: AutoPodCutViewModel
-    
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("AUTOPODCUT")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-                .padding(.top, 20)
-            
-            Text("Automatic Podcast Video Switcher")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            
-            Spacer()
-            
-            // Video One Selection Button
-            FileSelectionButton(
-                title: "Select Video One (Left)",
-                selectedFileName: viewModel.videoOneFileName,
-                action: { viewModel.selectVideoOne() }
-            )
-            
-            // Video Two Selection Button
-            FileSelectionButton(
-                title: "Select Video Two (Right)",
-                selectedFileName: viewModel.videoTwoFileName,
-                action: { viewModel.selectVideoTwo() }
-            )
-            
-            // Sound Audio Selection Button
-            FileSelectionButton(
-                title: "Select Sound Audio",
-                selectedFileName: viewModel.soundAudioFileName,
-                action: { viewModel.selectSoundAudio() }
-            )
-            
-            Spacer()
-            
-            // AUTO CUT Button - disabled until all files are selected
-            FuturisticButton(
-                title: "AUTO CUT",
-                isSelected: viewModel.canPerformAutoCut,
-                isEnabled: viewModel.canPerformAutoCut,
-                action: {
-                    viewModel.performAutoCut()
-                }
-            )
-            .padding(.horizontal, 40)
-            
-            // Progress indicator
-            if viewModel.isProcessing {
-                VStack(spacing: 12) {
-                    // Custom animated progress bar
-                    AnimatedProgressBar(progress: viewModel.progress)
-                        .frame(height: 8)
-                        .padding(.horizontal, 40)
-                    
-                    // Progress message
-                    Text(viewModel.progressMessage)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 40)
-                }
-                .padding(.vertical, 16)
-            }
-            
-            // Status message
-            if !viewModel.statusMessage.isEmpty {
-                Text(viewModel.statusMessage)
-                    .font(.caption)
-                    .foregroundColor(viewModel.isError ? .red : .green)
-                    .padding()
-            }
-            
-            Spacer()
-        }
-        .padding()
-    }
-}
 
 // MARK: - Animated Progress Bar
 
@@ -432,6 +356,15 @@ struct FileSelectionButton: View {
 
 @MainActor
 class AutoPodCutViewModel: ObservableObject {
+    @Published var cutMode: CutMode = .classic
+    
+    @Published var soundAudioNumChannels: Int = 6
+    @Published var soundTrackOne: Int = 1
+    @Published var soundTrackTwo: Int = 2
+    
+    @Published var videoOneCrop: CropPreset = .full
+    @Published var videoTwoCrop: CropPreset = .full
+    
     @Published var videoOneURL: URL?
     @Published var videoTwoURL: URL?
     @Published var soundAudioURL: URL?
@@ -469,9 +402,32 @@ class AutoPodCutViewModel: ObservableObject {
     }
     
     func selectSoundAudio() {
-        selectFile(allowedTypes: [UTType.mp3, UTType.mpeg4Audio, UTType.audio]) { [weak self] url in
+        selectFile(allowedTypes: [UTType.wav, UTType.mp3, UTType.mpeg4Audio, UTType.audio]) { [weak self] url in
             self?.soundAudioURL = url
             self?.soundAudioFileName = url?.lastPathComponent
+            
+            // Auto-detect track count from the audio file
+            if let url = url {
+                Task {
+                    do {
+                        let asset = AVURLAsset(url: url)
+                        if let track = try await asset.loadTracks(withMediaType: .audio).first {
+                            if let formatDescriptions = try await track.load(.formatDescriptions) as? [CMAudioFormatDescription], let format = formatDescriptions.first {
+                                if let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee {
+                                    await MainActor.run {
+                                        let channels = Int(asbd.mChannelsPerFrame)
+                                        self?.soundAudioNumChannels = max(1, channels)
+                                        self?.soundTrackOne = min(1, channels)
+                                        self?.soundTrackTwo = min(2, channels)
+                                    }
+                                }
+                            }
+                        }
+                    } catch {
+                        print("Failed to load channel count: \(error)")
+                    }
+                }
+            }
         }
     }
     
@@ -484,7 +440,9 @@ class AutoPodCutViewModel: ObservableObject {
         
         panel.begin { response in
             if response == .OK {
-                completion(panel.url)
+                DispatchQueue.main.async {
+                    completion(panel.url)
+                }
             }
         }
     }
@@ -516,8 +474,11 @@ class AutoPodCutViewModel: ObservableObject {
                 try await processAutoCut(
                     videoOneURL: videoOneURL,
                     videoTwoURL: videoTwoURL,
+                    videoOneCrop: videoOneCrop,
+                    videoTwoCrop: videoTwoCrop,
                     soundAudioURL: soundAudioURL,
-                    outputURL: outputURL
+                    outputURL: outputURL,
+                    cutMode: cutMode
                 )
             } catch {
                 await MainActor.run {
@@ -530,7 +491,15 @@ class AutoPodCutViewModel: ObservableObject {
         }
     }
     
-    private func processAutoCut(videoOneURL: URL, videoTwoURL: URL, soundAudioURL: URL, outputURL: URL) async throws {
+    private func processAutoCut(
+        videoOneURL: URL,
+        videoTwoURL: URL,
+        videoOneCrop: CropPreset,
+        videoTwoCrop: CropPreset,
+        soundAudioURL: URL,
+        outputURL: URL,
+        cutMode: CutMode
+    ) async throws {
         let processor = VideoCutProcessor()
         
         // Step 1: Load all assets
@@ -546,7 +515,11 @@ class AutoPodCutViewModel: ObservableObject {
         
         // Step 2: Extract audio for synchronization
         await updateProgress("Extracting audio channels...", progress: 0.2)
-        let (leftChannel, rightChannel, sampleRate) = try await processor.extractStereoChannels(from: soundAudioAsset)
+        let (leftChannel, rightChannel, sampleRate) = try await processor.extractSelectedChannels(
+            from: soundAudioAsset,
+            leftIndex: soundTrackOne,
+            rightIndex: soundTrackTwo
+        )
         
         // Create mono mix of Sound Audio for synchronization
         let monoMix = processor.createMonoMix(left: leftChannel, right: rightChannel)
@@ -581,14 +554,30 @@ class AutoPodCutViewModel: ObservableObject {
         
         // Step 5: Analyze loudness to determine speaker dominance over time
         await updateProgress("Analyzing speaker loudness...", progress: 0.6)
-        let soundAudioDuration = try await soundAudioAsset.load(.duration)
-        let speakerSegments = processor.analyzeSpeakerDominance(
-            leftChannel: leftChannel,
-            rightChannel: rightChannel,
-            sampleRate: sampleRate,
-            duration: soundAudioDuration.seconds,
-            minimumShotLength: 3.0
-        )
+        
+        // Calculate true duration from exact extracted samples to avoid corrupt file metadata issues
+        let exactDurationSeconds = Double(leftChannel.count) / Double(sampleRate)
+        let soundAudioDuration = CMTime(seconds: exactDurationSeconds, preferredTimescale: 600)
+        
+        let speakerSegments: [SpeakerSegment]
+        
+        if cutMode == .mainSpeakerSwitch {
+            speakerSegments = processor.analyzeMainSpeakerSwitch(
+                mainChannel: leftChannel, // Video One is Main Speaker
+                otherChannel: rightChannel,
+                sampleRate: sampleRate,
+                duration: exactDurationSeconds,
+                silenceDuration: 0.8
+            )
+        } else {
+            speakerSegments = processor.analyzeSpeakerDominance(
+                leftChannel: leftChannel,
+                rightChannel: rightChannel,
+                sampleRate: sampleRate,
+                duration: exactDurationSeconds,
+                minimumShotLength: 3.0
+            )
+        }
         
         print("Generated \(speakerSegments.count) video segments")
         for segment in speakerSegments {
@@ -611,6 +600,8 @@ class AutoPodCutViewModel: ObservableObject {
             soundAudioAsset: soundAudioAsset,
             videoOneOffset: videoOneOffset,
             videoTwoOffset: videoTwoOffset,
+            videoOneCrop: videoOneCrop,
+            videoTwoCrop: videoTwoCrop,
             speakerSegments: speakerSegments,
             outputSize: naturalSize,
             soundAudioDuration: soundAudioDuration
@@ -658,7 +649,7 @@ class AutoPodCutViewModel: ObservableObject {
                         let formatter = DateFormatter()
                         formatter.dateFormat = "yyyyMMdd_HHmmss"
                         let timestamp = formatter.string(from: Date())
-                        let outputURL = folderURL.appendingPathComponent("AutoPodCut_\(timestamp).mov")
+                        let outputURL = folderURL.appendingPathComponent("AutoPodCut_\(timestamp).mp4")
                         continuation.resume(returning: outputURL)
                     } else {
                         continuation.resume(returning: nil)
@@ -714,9 +705,9 @@ class VideoCutProcessor {
     
     // MARK: - Audio Extraction
     
-    /// Extracts stereo channels from the Sound Audio file
+    /// Extracts specific tracks from the Sound Audio file
     /// Returns left channel (Video One speaker), right channel (Video Two speaker), and sample rate
-    func extractStereoChannels(from asset: AVAsset) async throws -> (left: [Float], right: [Float], sampleRate: Float) {
+    func extractSelectedChannels(from asset: AVAsset, leftIndex: Int, rightIndex: Int) async throws -> (left: [Float], right: [Float], sampleRate: Float) {
         guard let audioTrack = try await asset.loadTracks(withMediaType: .audio).first else {
             throw ProcessingError.noAudioTrack
         }
@@ -724,7 +715,6 @@ class VideoCutProcessor {
         // Create an asset reader to read audio samples
         let reader = try AVAssetReader(asset: asset)
         
-        // Configure output settings for PCM float data
         let outputSettings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVLinearPCMBitDepthKey: 32,
@@ -740,14 +730,18 @@ class VideoCutProcessor {
         var leftSamples: [Float] = []
         var rightSamples: [Float] = []
         var sampleRate: Float = 44100
+        var channelCount: Int = 2
+        var isFormatRead = false
         
         // Read all sample buffers
         while let sampleBuffer = output.copyNextSampleBuffer() {
             // Get format description to extract sample rate
-            if let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
+            if !isFormatRead, let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
                 let audioStreamBasicDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
                 if let asbd = audioStreamBasicDescription?.pointee {
                     sampleRate = Float(asbd.mSampleRate)
+                    channelCount = Int(asbd.mChannelsPerFrame)
+                    isFormatRead = true
                 }
             }
             
@@ -763,14 +757,14 @@ class VideoCutProcessor {
             let floatCount = length / MemoryLayout<Float>.size
             let floatPointer = data.withMemoryRebound(to: Float.self, capacity: floatCount) { $0 }
             
-            // Separate into left and right channels
-            for i in stride(from: 0, to: floatCount, by: 2) {
-                if i < floatCount {
-                    leftSamples.append(floatPointer[i])
-                }
-                if i + 1 < floatCount {
-                    rightSamples.append(floatPointer[i + 1])
-                }
+            let numFrames = floatCount / channelCount
+            let lIdx = max(0, min(leftIndex - 1, channelCount - 1))
+            let rIdx = max(0, min(rightIndex - 1, channelCount - 1))
+            
+            for frame in 0..<numFrames {
+                let baseIndex = frame * channelCount
+                leftSamples.append(floatPointer[baseIndex + lIdx])
+                rightSamples.append(floatPointer[baseIndex + rIdx])
             }
         }
         
@@ -1628,6 +1622,88 @@ class VideoCutProcessor {
         return segments
     }
     
+    /// Analyzes speaker segments strictly following the "Main Speaker" paradigm.
+    /// Main Speaker (MainChannel) holds the view until they are silent for `silenceDuration` seconds.
+    func analyzeMainSpeakerSwitch(
+        mainChannel: [Float],
+        otherChannel: [Float],
+        sampleRate: Float,
+        duration: Double,
+        silenceDuration: Double
+    ) -> [SpeakerSegment] {
+        
+        // 100ms analysis windows
+        let windowSize = Int(sampleRate * 0.1)
+        let windowCount = min(mainChannel.count, otherChannel.count) / windowSize
+        
+        var mainRMS: [Float] = []
+        var otherRMS: [Float] = []
+        for i in 0..<windowCount {
+            let startIndex = i * windowSize
+            let endIndex = min(startIndex + windowSize, min(mainChannel.count, otherChannel.count))
+            mainRMS.append(calculateRMS(Array(mainChannel[startIndex..<endIndex])))
+            otherRMS.append(calculateRMS(Array(otherChannel[startIndex..<endIndex])))
+        }
+        
+        // Dynamically calculate noise floor and peak
+        let sortedMain = mainRMS.sorted()
+        let noiseFloor = sortedMain[max(0, sortedMain.count / 20)] // 5th percentile
+        let peakRMS = sortedMain[min(sortedMain.count - 1, Int(Double(sortedMain.count) * 0.95))] // 95th percentile
+        
+        // The silence threshold is dynamically set at 15% of the dynamic range above noise floor
+        let silenceThreshold = noiseFloor + (peakRMS - noiseFloor) * 0.15
+        
+        print("Main Speaker Config - Noise Floor: \(noiseFloor), Peak: \(peakRMS), Silence Threshold: \(silenceThreshold)")
+        
+        let windowDuration = Double(windowSize) / Double(sampleRate)
+        let requiredSilentWindows = Int(silenceDuration / windowDuration)
+        
+        var segments: [SpeakerSegment] = []
+        var currentSpeaker: Speaker = .videoOne // Default to Main Speaker
+        var segmentStartTime = 0.0
+        var silentWindowsCount = 0
+        
+        for i in 0..<windowCount {
+            let mRMS = mainRMS[i]
+            let oRMS = otherRMS[i]
+            let currentTime = Double(i) * windowDuration
+            
+            // Main speaker is "silent" if its volume is below the dynamic threshold 
+            // OR if the other channel is 1.5x louder (identifying microphone bleed)
+            let isSilent = (mRMS < silenceThreshold) || (oRMS > mRMS * 1.5)
+            
+            if isSilent {
+                silentWindowsCount += 1
+            } else {
+                silentWindowsCount = 0
+            }
+            
+            let shouldBeMain = silentWindowsCount < requiredSilentWindows
+            let targetSpeaker: Speaker = shouldBeMain ? .videoOne : .videoTwo
+            
+            if targetSpeaker != currentSpeaker {
+                if i > 0 { // Avoid zero-length first segment
+                    segments.append(SpeakerSegment(
+                        speaker: currentSpeaker,
+                        startTime: segmentStartTime,
+                        endTime: currentTime
+                    ))
+                }
+                currentSpeaker = targetSpeaker
+                segmentStartTime = currentTime
+            }
+        }
+        
+        // Final segment
+        segments.append(SpeakerSegment(
+            speaker: currentSpeaker,
+            startTime: segmentStartTime,
+            endTime: duration
+        ))
+        
+        return segments
+    }
+    
     /// Calculates Root Mean Square of audio samples
     private func calculateRMS(_ samples: [Float]) -> Float {
         guard !samples.isEmpty else { return 0 }
@@ -1645,6 +1721,8 @@ class VideoCutProcessor {
         soundAudioAsset: AVAsset,
         videoOneOffset: Double,
         videoTwoOffset: Double,
+        videoOneCrop: CropPreset,
+        videoTwoCrop: CropPreset,
         speakerSegments: [SpeakerSegment],
         outputSize: CGSize,
         soundAudioDuration: CMTime
@@ -1653,7 +1731,14 @@ class VideoCutProcessor {
         let composition = AVMutableComposition()
         
         // Create tracks in composition
-        guard let compositionVideoTrack = composition.addMutableTrack(
+        guard let compVideoOneTrack = composition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw ProcessingError.compositionFailed
+        }
+        
+        guard let compVideoTwoTrack = composition.addMutableTrack(
             withMediaType: .video,
             preferredTrackID: kCMPersistentTrackID_Invalid
         ) else {
@@ -1690,7 +1775,8 @@ class VideoCutProcessor {
         // Insert video segments based on speaker analysis
         for segment in speakerSegments {
             let segmentStart = CMTime(seconds: segment.startTime, preferredTimescale: 600)
-            let segmentDuration = CMTime(seconds: segment.endTime - segment.startTime, preferredTimescale: 600)
+            let segmentEnd = CMTime(seconds: segment.endTime, preferredTimescale: 600)
+            let segmentDuration = CMTimeSubtract(segmentEnd, segmentStart)
             
             switch segment.speaker {
             case .videoOne:
@@ -1705,7 +1791,7 @@ class VideoCutProcessor {
                         let actualDuration = CMTimeMinimum(segmentDuration, availableDuration)
                         
                         if actualDuration > .zero {
-                            try compositionVideoTrack.insertTimeRange(
+                            try compVideoOneTrack.insertTimeRange(
                                 CMTimeRange(start: sourceTime, duration: actualDuration),
                                 of: track,
                                 at: segmentStart
@@ -1724,7 +1810,7 @@ class VideoCutProcessor {
                         let actualDuration = CMTimeMinimum(segmentDuration, availableDuration)
                         
                         if actualDuration > .zero {
-                            try compositionVideoTrack.insertTimeRange(
+                            try compVideoTwoTrack.insertTimeRange(
                                 CMTimeRange(start: sourceTime, duration: actualDuration),
                                 of: track,
                                 at: segmentStart
@@ -1741,21 +1827,87 @@ class VideoCutProcessor {
             }
         }
         
+        // Determine if we should render a half-width video (e.g., vertical/TikTok style)
+        // This makes sense if both videos are requested to be cropped.
+        let isHalfWidthOutput = (videoOneCrop != .full && videoTwoCrop != .full)
+        let renderSize = isHalfWidthOutput ? CGSize(width: outputSize.width / 2, height: outputSize.height) : outputSize
+        
         // Create video composition for proper rendering
         let videoComposition = AVMutableVideoComposition()
-        videoComposition.renderSize = outputSize
+        videoComposition.renderSize = renderSize
         videoComposition.frameDuration = CMTime(value: 1, timescale: 30) // 30 fps
         
-        // Create instruction for the entire duration
-        let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = CMTimeRange(start: .zero, duration: soundAudioDuration)
+        // Build individual instructions per segment to avoid empty track crashes
+        var instructions: [AVMutableVideoCompositionInstruction] = []
         
-        // Layer instruction for the video track
-        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionVideoTrack)
+        for segment in speakerSegments {
+            let segmentStart = CMTime(seconds: segment.startTime, preferredTimescale: 600)
+            let segmentEnd = CMTime(seconds: segment.endTime, preferredTimescale: 600)
+            let rawSegmentDuration = CMTimeSubtract(segmentEnd, segmentStart)
+            
+            // Skip invalid or negative duration segments
+            guard rawSegmentDuration > .zero else { continue }
+            
+            let instruction = AVMutableVideoCompositionInstruction()
+            instruction.timeRange = CMTimeRange(start: segmentStart, duration: rawSegmentDuration)
+            
+            var layers: [AVMutableVideoCompositionLayerInstruction] = []
+            
+            // Check if Video One is active in this segment
+            if segment.speaker == .videoOne {
+                let sourceTime = CMTime(seconds: segment.startTime + videoOneOffset, preferredTimescale: 600)
+                if let track = videoOneTrack, sourceTime >= .zero, let assetDuration = try? await videoOneAsset.load(.duration), sourceTime < assetDuration {
+                    let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoOneTrack)
+                    let transform = try? await track.load(.preferredTransform)
+                    
+                    if isHalfWidthOutput {
+                        let offsetTransform = videoOneCrop == .rightHalf ? CGAffineTransform(translationX: -outputSize.width / 2, y: 0) : .identity
+                        layer.setTransform((transform ?? .identity).concatenating(offsetTransform), at: segmentStart)
+                    } else {
+                        if videoOneCrop == .leftHalf {
+                            layer.setCropRectangle(CGRect(x: 0, y: 0, width: outputSize.width / 2, height: outputSize.height), at: segmentStart)
+                        } else if videoOneCrop == .rightHalf {
+                            layer.setCropRectangle(CGRect(x: outputSize.width / 2, y: 0, width: outputSize.width / 2, height: outputSize.height), at: segmentStart)
+                        }
+                        layer.setTransform(transform ?? .identity, at: segmentStart)
+                    }
+                    layer.setOpacity(1.0, at: segmentStart)
+                    layers.append(layer)
+                }
+            } else if segment.speaker == .videoTwo {
+                let sourceTime = CMTime(seconds: segment.startTime + videoTwoOffset, preferredTimescale: 600)
+                if let track = videoTwoTrack, sourceTime >= .zero, let assetDuration = try? await videoTwoAsset.load(.duration), sourceTime < assetDuration {
+                    let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoTwoTrack)
+                    let transform = try? await track.load(.preferredTransform)
+                    
+                    if isHalfWidthOutput {
+                        let offsetTransform = videoTwoCrop == .rightHalf ? CGAffineTransform(translationX: -outputSize.width / 2, y: 0) : .identity
+                        layer.setTransform((transform ?? .identity).concatenating(offsetTransform), at: segmentStart)
+                    } else {
+                        if videoTwoCrop == .leftHalf {
+                            layer.setCropRectangle(CGRect(x: 0, y: 0, width: outputSize.width / 2, height: outputSize.height), at: segmentStart)
+                        } else if videoTwoCrop == .rightHalf {
+                            layer.setCropRectangle(CGRect(x: outputSize.width / 2, y: 0, width: outputSize.width / 2, height: outputSize.height), at: segmentStart)
+                        }
+                        layer.setTransform(transform ?? .identity, at: segmentStart)
+                    }
+                    layer.setOpacity(1.0, at: segmentStart)
+                    layers.append(layer)
+                }
+            }
+            
+            // If layers is empty, add a dummy layer with 0 opacity to prevent empty array crashes
+            if layers.isEmpty {
+                let emptyLayer = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoOneTrack) // We can bind it safely to track 1
+                emptyLayer.setOpacity(0.0, at: segmentStart)
+                layers.append(emptyLayer)
+            }
+            
+            instruction.layerInstructions = layers
+            instructions.append(instruction)
+        }
         
-        // Apply transforms if needed to fit the output size
-        instruction.layerInstructions = [layerInstruction]
-        videoComposition.instructions = [instruction]
+        videoComposition.instructions = instructions
         
         return (composition, videoComposition)
     }
@@ -1785,13 +1937,21 @@ class VideoCutProcessor {
         
         // Use the new async throwing export API (macOS 15+)
         do {
-            try await exportSession.export(to: outputURL, as: .mov)
+            try await exportSession.export(to: outputURL, as: .mp4)
             print("Export completed successfully")
         } catch {
             print("Export failed: \(error.localizedDescription)")
             throw ProcessingError.exportFailed(error.localizedDescription)
         }
     }
+}
+
+// MARK: - Crop Preset
+
+enum CropPreset: String, CaseIterable {
+    case full = "Full Video"
+    case leftHalf = "Left Half"
+    case rightHalf = "Right Half"
 }
 
 // MARK: - Preview
