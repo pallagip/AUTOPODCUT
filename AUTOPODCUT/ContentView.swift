@@ -763,7 +763,7 @@ class AutoPodCutViewModel: ObservableObject {
                 rightChannel: rightChannel,
                 sampleRate: sampleRate,
                 duration: exactDurationSeconds,
-                minimumShotLength: 3.0
+                minimumShotLength: 2.5
             )
         }
         
@@ -2038,7 +2038,7 @@ class VideoCutProcessor {
         var currentSpeaker: Speaker = .videoOne // Default to Main Speaker
         var segmentStartTime = 0.0
         var lastSwitchTime = 0.0
-        let minimumShotLength = 1.0 // 1 second minimum shot length
+        let minimumShotLength = 2.5 // 2.5 second minimum shot length
         
         for i in 0..<windowCount {
             let mRMS = mainRMS[i]
@@ -2136,7 +2136,7 @@ class VideoCutProcessor {
         var currentSpeaker: Speaker = .videoOne // Default to Main Speaker
         var segmentStartTime = 0.0
         var lastSwitchTime = 0.0
-        let minimumShotLength = 1.0 // 1 second minimum shot length
+        let minimumShotLength = 2.5 // 2.5 second minimum shot length
         
         for i in 0..<windowCount {
             let mRMS = mainRMS[i]
@@ -2227,7 +2227,7 @@ class VideoCutProcessor {
         var currentSpeaker: Speaker = .hostLeft // Default to Left Host
         var segmentStartTime = 0.0
         var lastSwitchTime = 0.0
-        let minimumShotLength = 1.0
+        let minimumShotLength = 2.5
         
         for i in 0..<windowCount {
             let hl = hlRMS[i]
@@ -2242,11 +2242,16 @@ class VideoCutProcessor {
             if g > silenceThreshold && g > (hl * 1.5) && g > (hr * 1.5) && g > (hm * 1.5) {
                 targetSpeaker = .guest
             } else if hm > silenceThreshold && hm > hl && hm > hr && hm > g {
-                // Middle host dominates. Keep current host side, or default Left.
-                if currentSpeaker == .guest {
-                    targetSpeaker = .hostLeft // Fallback
+                // Middle host dominates. Make decision based on who is louder between Left and Right
+                let leftScore = currentSpeaker == .hostLeft ? hl * 1.1 : hl
+                let rightScore = currentSpeaker == .hostRight ? hr * 1.1 : hr
+                
+                if leftScore > rightScore {
+                    targetSpeaker = .hostLeft
+                } else if rightScore > leftScore {
+                    targetSpeaker = .hostRight
                 } else {
-                    targetSpeaker = currentSpeaker // Stay on Left or Right
+                    targetSpeaker = currentSpeaker == .guest ? .hostLeft : currentSpeaker
                 }
             } else if hl > silenceThreshold && hl > hr && hl > g {
                 targetSpeaker = .hostLeft
@@ -2332,6 +2337,18 @@ class VideoCutProcessor {
             throw ProcessingError.compositionFailed
         }
         
+        // For ThreeHostPanel, we need a 3rd video track for the Right Host
+        var compVideoThreeTrack: AVMutableCompositionTrack? = nil
+        if cutMode == .threeHostPanel {
+            compVideoThreeTrack = composition.addMutableTrack(
+                withMediaType: .video,
+                preferredTrackID: kCMPersistentTrackID_Invalid
+            )
+            if compVideoThreeTrack == nil {
+                throw ProcessingError.compositionFailed
+            }
+        }
+        
         // Get video tracks from source assets
         let videoOneTracks = try await videoOneAsset.loadTracks(withMediaType: .video)
         let videoTwoTracks = try await videoTwoAsset.loadTracks(withMediaType: .video)
@@ -2386,6 +2403,14 @@ class VideoCutProcessor {
                     of: track,
                     at: v1CompStart
                 )
+                
+                if cutMode == .threeHostPanel, let compThree = compVideoThreeTrack {
+                    try compThree.insertTimeRange(
+                        CMTimeRange(start: v1StartOffset, duration: sourceDuration),
+                        of: track,
+                        at: v1CompStart
+                    )
+                }
             }
         }
         
@@ -2494,8 +2519,14 @@ class VideoCutProcessor {
                 }
             }
             
+            var layer3: AVMutableVideoCompositionLayerInstruction? = nil
+            if let compThree = compVideoThreeTrack {
+                layer3 = AVMutableVideoCompositionLayerInstruction(assetTrack: compThree)
+            }
+            
             if cutMode == .threeHostPanel {
-                if segment.speaker == .hostLeft, let crop = hostLeftCrop {
+                // Apply Left Crop to layer1 persistently
+                if let crop = hostLeftCrop {
                     let scaleX = outputSize.width / crop.width
                     let scaleY = outputSize.height / crop.height
                     let scale = max(scaleX, scaleY) // fill 4K screen
@@ -2508,7 +2539,12 @@ class VideoCutProcessor {
                         .concatenating(CGAffineTransform(translationX: translateX, y: translateY))
                     
                     layer1.setTransform(finalTransform, at: segmentStart)
-                } else if segment.speaker == .hostRight, let crop = hostRightCrop {
+                } else {
+                    layer1.setTransform(transform1, at: segmentStart)
+                }
+                
+                // Apply Right Crop to layer3 persistently
+                if let layer3 = layer3, let crop = hostRightCrop {
                     let scaleX = outputSize.width / crop.width
                     let scaleY = outputSize.height / crop.height
                     let scale = max(scaleX, scaleY)
@@ -2520,9 +2556,9 @@ class VideoCutProcessor {
                         .concatenating(CGAffineTransform(scaleX: scale, y: scale))
                         .concatenating(CGAffineTransform(translationX: translateX, y: translateY))
                     
-                    layer1.setTransform(finalTransform, at: segmentStart)
-                } else {
-                    layer1.setTransform(transform1, at: segmentStart)
+                    layer3.setTransform(finalTransform, at: segmentStart)
+                } else if let layer3 = layer3 {
+                    layer3.setTransform(transform1, at: segmentStart)
                 }
             } else if isHalfWidthOutput {
                 let offsetTransform = videoOneCrop == .rightHalf ? CGAffineTransform(translationX: -outputSize.width / 2, y: 0) : .identity
@@ -2562,18 +2598,26 @@ class VideoCutProcessor {
             
             // Set opacity based on active speaker
             if cutMode == .threeHostPanel {
-                if segment.speaker == .hostLeft || segment.speaker == .hostRight {
+                if segment.speaker == .hostLeft {
                     layer1.setOpacity(1.0, at: segmentStart)
+                    layer3?.setOpacity(0.0, at: segmentStart)
                     layer2.setOpacity(0.0, at: segmentStart)
-                    instruction.layerInstructions = [layer1, layer2]
+                    instruction.layerInstructions = [layer1, layer2] + (layer3 != nil ? [layer3!] : [])
+                } else if segment.speaker == .hostRight {
+                    layer1.setOpacity(0.0, at: segmentStart)
+                    layer3?.setOpacity(1.0, at: segmentStart)
+                    layer2.setOpacity(0.0, at: segmentStart)
+                    instruction.layerInstructions = (layer3 != nil ? [layer3!] : []) + [layer1, layer2]
                 } else if segment.speaker == .guest {
                     layer1.setOpacity(0.0, at: segmentStart)
+                    layer3?.setOpacity(0.0, at: segmentStart)
                     layer2.setOpacity(1.0, at: segmentStart)
-                    instruction.layerInstructions = [layer2, layer1]
+                    instruction.layerInstructions = [layer2, layer1] + (layer3 != nil ? [layer3!] : [])
                 } else {
                     layer1.setOpacity(1.0, at: segmentStart)
+                    layer3?.setOpacity(0.0, at: segmentStart)
                     layer2.setOpacity(0.0, at: segmentStart)
-                    instruction.layerInstructions = [layer1, layer2]
+                    instruction.layerInstructions = [layer1, layer2] + (layer3 != nil ? [layer3!] : [])
                 }
             } else {
                 if segment.speaker == .videoOne {
