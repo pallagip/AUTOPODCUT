@@ -1,6 +1,7 @@
 import SwiftUI
 import AVKit
 import AVFoundation
+import AppKit
 
 struct CropSelectionView: View {
     let videoURL: URL
@@ -28,15 +29,27 @@ struct CropSelectionView: View {
             GeometryReader { geo in
                 ZStack {
                     if let player = player {
-                        VideoPlayer(player: player)
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .onAppear {
-                                self.viewSize = geo.size
-                                calculateInitialCrop()
-                            }
-                            .onChange(of: geo.size) { newSize in
-                                self.viewSize = newSize
-                            }
+                        if #available(macOS 14.0, *) {
+                            VideoPlayer(player: player)
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .onAppear {
+                                    self.viewSize = geo.size
+                                    calculateInitialCrop()
+                                }
+                                .onChange(of: geo.size) { oldSize, newSize in
+                                    self.viewSize = newSize
+                                }
+                        } else {
+                            VideoPlayer(player: player)
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .onAppear {
+                                    self.viewSize = geo.size
+                                    calculateInitialCrop()
+                                }
+                                .onChange(of: geo.size, perform: { newSize in
+                                    self.viewSize = newSize
+                                })
+                        }
                     } else {
                         Color.black
                     }
@@ -82,7 +95,10 @@ struct CropSelectionView: View {
             }
             .padding()
         }
-        .frame(width: 800, height: 600)
+        .frame(
+            width: (NSScreen.main?.visibleFrame.width ?? 1440) * 0.85,
+            height: (NSScreen.main?.visibleFrame.height ?? 900) * 0.85
+        )
         .onAppear {
             setupPlayer()
         }
@@ -92,7 +108,7 @@ struct CropSelectionView: View {
     }
     
     private func setupPlayer() {
-        let asset = AVAsset(url: videoURL)
+        let asset = AVURLAsset(url: videoURL)
         Task {
             if #available(macOS 12.0, *) {
                 if let track = try? await asset.loadTracks(withMediaType: .video).first {
@@ -171,6 +187,7 @@ struct CropOverlay: View {
                     path.addRect(CGRect(x: rectX, y: rectY, width: rectW, height: rectH))
                 }
                 .fill(Color.black.opacity(0.5), style: FillStyle(eoFill: true))
+                .allowsHitTesting(false)
                 
                 // Crop box
                 Rectangle()
